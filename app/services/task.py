@@ -19,6 +19,7 @@ from app.services import bgm as bgm_service
 from app.services import (
     elevenlabs_music,
     llm,
+    long_script,
     loomloom,
     material,
     metaso_minimax,
@@ -289,10 +290,42 @@ def _mark_task_failed(
     return failure
 
 
+def is_long_video(params) -> bool:
+    return long_script.clamp_minutes(getattr(params, "video_duration_minutes", 0)) > 0
+
+
+def _generate_long_script(task_id, params):
+    def progress(done, total):
+        # Script writing is slow on a laptop CPU; show movement in the UI.
+        sm.state.update_task(task_id, progress=5 + int(5 * done / total))
+
+    try:
+        result = long_script.generate_long_script(
+            subject=params.video_subject,
+            language=params.video_language,
+            minutes=params.video_duration_minutes,
+            voice_rate=params.voice_rate,
+            extra_prompt=params.video_script_prompt,
+            with_terms=not params.video_terms and params.video_source != "local",
+            progress=progress,
+        )
+    except RuntimeError as exc:
+        logger.error(f"failed to generate long video script: {exc}")
+        return ""
+    if result.terms and not params.video_terms:
+        # Ordered per-section terms keep footage in step with the narration
+        # and spread the video over many different clips.
+        params.video_terms = result.terms
+        params.match_materials_to_script = True
+    return result.script
+
+
 def generate_script(task_id, params):
     logger.info("\n\n## generating video script")
     video_script = params.video_script.strip()
-    if not video_script:
+    if not video_script and is_long_video(params):
+        video_script = _generate_long_script(task_id, params)
+    elif not video_script:
         video_script = llm.generate_script(
             video_subject=params.video_subject,
             language=params.video_language,
@@ -878,6 +911,25 @@ def _get_material_source_groups(task_id: str, video_paths: list[str]) -> dict[st
     except (OSError, ValueError, AttributeError, TypeError) as exc:
         logger.warning(f"Cannot read material keyword groups: task_id={task_id}, error={exc}")
         return {}
+
+
+def order_videos_by_terms(task_id: str, video_paths: list[str], video_terms) -> list[str]:
+    """Group downloaded clips by search term, in script order.
+
+    Ordered downloads are round-robin (one clip per term per round) so every
+    section gets footage. For a long video the clips must then be grouped by
+    term, otherwise the timeline cycles through all topics several times
+    instead of following the narration.
+    """
+    groups = _get_material_source_groups(task_id, video_paths)
+    if not groups or not isinstance(video_terms, list):
+        return video_paths
+    rank = {term: index for index, term in enumerate(video_terms)}
+    positions = {file: index for index, file in enumerate(video_paths)}
+    return sorted(
+        video_paths,
+        key=lambda file: (rank.get(groups.get(file), len(rank)), positions[file]),
+    )
 
 
 def generate_final_videos(
@@ -1594,6 +1646,8 @@ def _run_pipeline(
         audio_duration,
         loomloom_video_request=loomloom_video_request,
     )
+    if downloaded_videos and is_long_video(params) and params.match_materials_to_script:
+        downloaded_videos = order_videos_by_terms(task_id, downloaded_videos, video_terms)
     if not downloaded_videos:
         return _mark_task_failed(
             task_id,

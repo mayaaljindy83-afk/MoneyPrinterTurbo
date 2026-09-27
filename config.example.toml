@@ -252,6 +252,11 @@ sonilo_timeout = 600
 # Registry defaults; only set them when you need an explicit override.
 llm_provider = "moonshot"
 
+# Optional second provider, used only when llm_provider fails (for example a
+# local Ollama that is not running). A free Gemini key works well:
+# llm_fallback_provider = "gemini" with gemini_model_name = "gemini-2.5-flash".
+llm_fallback_provider = ""
+
 # Kimi / Moonshot AI
 # API key: https://platform.kimi.com?track_id=track-2f5441d6ffd84c509dd079d78e9db5dc&aff=moneyprinterturbo
 moonshot_api_key = ""

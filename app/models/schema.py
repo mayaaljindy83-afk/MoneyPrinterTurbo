@@ -157,6 +157,9 @@ class VideoParams(BaseModel):
     stroke_width: float = 1.5
     n_threads: Optional[int] = 2
     paragraph_number: int = Field(default=1, ge=1, le=10)
+    # Long video mode: > 0 writes the script section by section to reach
+    # roughly this many minutes of narration (paragraph_number is ignored).
+    video_duration_minutes: float = Field(default=0, ge=0, le=10)
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
 
