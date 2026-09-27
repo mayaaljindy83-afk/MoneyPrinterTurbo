@@ -1,3 +1,4 @@
+import contextlib
 import itertools
 import io
 import math
@@ -40,7 +41,7 @@ from app.models.schema import (
 )
 from app.services import bgm as bgm_service
 from app.services.utils import video_effects
-from app.utils import file_security, utils
+from app.utils import file_security, rtl_text, utils
 
 class SubClippedVideoClip:
     def __init__(
@@ -984,7 +985,13 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
     # 字幕换行必须在真正创建 TextClip 前完成，否则 MoviePy 只会按原始文本
     # 计算渲染区域。这里用 PIL 按当前字体和字号测量宽度，确保每一行都尽量
     # 控制在视频可用宽度内，避免大字号或中文长句直接溢出画面。
-    font = ImageFont.truetype(font, fontsize)
+    # RTL (Arabic) text is wrapped in logical order, measured in its shaped
+    # form with the BASIC engine, and every final line is converted to visual
+    # order. See app/utils/rtl_text.py for why raqm is not used.
+    rtl = rtl_text.contains_rtl(text)
+    font = ImageFont.truetype(
+        font, fontsize, layout_engine=ImageFont.Layout.BASIC if rtl else None
+    )
     max_width = int(max_width)
 
     # getbbox() 返回的是“当前字形的可见墨迹高度”，并不是字体行高。例如只含
@@ -1006,6 +1013,8 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
         inner_text = inner_text.strip()
         if not inner_text:
             return 0, line_height
+        if rtl:
+            inner_text = rtl_text.shape_line(inner_text)
         left, top, right, bottom = font.getbbox(inner_text)
         # bbox 仍适合测量换行所需的实际宽度；高度必须始终使用稳定字体行高。
         return right - left, line_height
@@ -1014,6 +1023,8 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
     if width <= max_width:
         # SRT 条目允许作者手工换行。即使整段文本在宽度上不需要再次折行，
         # 画布高度仍必须按现有行数计算，否则第二行及后续行会被裁掉。
+        if rtl:
+            text = rtl_text.shape_text(text)
         return text, (text.count("\n") + 1) * line_height
 
     def split_long_token(token):
@@ -1057,7 +1068,9 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
     if current:
         lines.append(current)
 
-    line_start_punctuation = "，。！？；：、,.!?;:)]}）】》」』”’"
+    line_start_punctuation = (
+        "，。！？；：、,.!?;:)]}）】》」』”’" + rtl_text.ARABIC_LINE_START_PUNCTUATION
+    )
     for index in range(1, len(lines)):
         # 中文长句按字符拆分时，最后一个句号、逗号等闭合标点可能被单独
         # 放到下一行，导致字幕背景被异常撑高，视觉上像一个小点掉在正文
@@ -1078,6 +1091,8 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
     # 高度以最终结果为准。原文本中的显式换行可能保留在某个 token 内，
     # 此时临时 lines 列表的长度不等于 MoviePy 实际渲染的行数。
     height = (result.count("\n") + 1) * line_height
+    if rtl:
+        result = rtl_text.shape_text(result)
     return result, height
 
 
@@ -1247,6 +1262,21 @@ def generate_video(
         )
         if os.name == "nt":
             font_path = font_path.replace("\\", "/")
+
+        # Arabic subtitles with a font that has no Arabic glyphs (e.g. the
+        # upstream default STHeiti) would render as empty boxes.
+        if subtitle_path and os.path.exists(subtitle_path):
+            with open(subtitle_path, encoding="utf-8", errors="ignore") as fp:
+                subtitle_text = fp.read()
+            resolved_font_path = rtl_text.resolve_font_for_text(
+                font_path, subtitle_text, utils.font_dir()
+            )
+            if resolved_font_path != font_path:
+                logger.warning(
+                    f"font {params.font_name} cannot draw Arabic text, "
+                    f"using {rtl_text.DEFAULT_ARABIC_FONT} instead"
+                )
+                font_path = resolved_font_path
 
         logger.info(f"  ⑤ font: {font_path}")
 
@@ -1458,7 +1488,14 @@ def generate_video(
             )
             text_clips = []
             for item in sub.subtitles:
-                clip = create_text_clip(subtitle_item=item)
+                # Shaped RTL lines must be drawn exactly as given (BASIC engine).
+                layout = (
+                    rtl_text.basic_layout()
+                    if rtl_text.contains_rtl(item[1])
+                    else contextlib.nullcontext()
+                )
+                with layout:
+                    clip = create_text_clip(subtitle_item=item)
                 text_clips.append(clip)
             video_clip = CompositeVideoClip([video_clip, *text_clips])
             clip_stack.callback(video_clip.close)
