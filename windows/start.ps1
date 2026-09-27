@@ -36,6 +36,7 @@ if ($DataDir) {
     $env:TEMP = Join-Path $DataDir "temp"
     $env:TMP = $env:TEMP
     New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+    $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $DataDir "playwright-browsers"
 }
 $models = [Environment]::GetEnvironmentVariable("OLLAMA_MODELS", "User")
 if ($models) { $env:OLLAMA_MODELS = $models }
