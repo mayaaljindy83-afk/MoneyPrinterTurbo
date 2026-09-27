@@ -442,6 +442,10 @@
     "Create Prompts Needs Script": "Əvvəlcə video ssenarisini yazın və ya yaradın.",
     "Creating Prompts": "Hər paraqraf üçün bir AI səhnə promptu yazılır...",
     "Kaggle Prompts Help": "Bu sətirləri Kaggle notbukunun PROMPTS xanasına yapışdırın (hər sətir bir klip).",
-    "Download prompts.txt": "prompts.txt yüklə"
+    "Download prompts.txt": "prompts.txt yüklə",
+    "Show Logo Watermark": "Videoda loqonu göstər",
+    "Show Logo Watermark Help": "Bu qovluqdakı logo.png bütün video boyunca yuxarı küncdə göstərilir: {folder}",
+    "Add Website Screenshots": "Sayt ekran görüntülərini əlavə et",
+    "Add Website Screenshots Help": "{folder} qovluğunun \"screenshots\" alt qovluğundakı şəkillər videoya qarışdırılır (adında \"mobile\" olanlar şaquli videolar üçündür)."
   }
 }

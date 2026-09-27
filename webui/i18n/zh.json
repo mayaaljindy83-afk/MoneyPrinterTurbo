@@ -594,6 +594,10 @@
     "Create Prompts Needs Script": "请先填写或生成视频文案。",
     "Creating Prompts": "正在为每个段落撰写 AI 场景提示词……",
     "Kaggle Prompts Help": "把这些行粘贴到 Kaggle 笔记本的 PROMPTS 单元格（每行一个片段）。",
-    "Download prompts.txt": "下载 prompts.txt"
+    "Download prompts.txt": "下载 prompts.txt",
+    "Show Logo Watermark": "在视频上显示标志",
+    "Show Logo Watermark Help": "在整个视频的上角显示此文件夹中的 logo.png：{folder}",
+    "Add Website Screenshots": "加入网站截图",
+    "Add Website Screenshots Help": "将 {folder} 中 \"screenshots\" 子文件夹里的图片混入视频（文件名含 \"mobile\" 的用于竖屏视频）。"
   }
 }

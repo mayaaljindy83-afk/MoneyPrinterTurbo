@@ -442,6 +442,10 @@
     "Create Prompts Needs Script": "Önce video senaryosunu yazın veya oluşturun.",
     "Creating Prompts": "Her paragraf için bir yapay zekâ sahne istemi yazılıyor...",
     "Kaggle Prompts Help": "Bu satırları Kaggle not defterindeki PROMPTS hücresine yapıştırın (her satır bir klip).",
-    "Download prompts.txt": "prompts.txt indir"
+    "Download prompts.txt": "prompts.txt indir",
+    "Show Logo Watermark": "Videoda logoyu göster",
+    "Show Logo Watermark Help": "Bu klasördeki logo.png'yi videonun tamamında üst köşede gösterir: {folder}",
+    "Add Website Screenshots": "Web sitesi ekran görüntüleri ekle",
+    "Add Website Screenshots Help": "{folder} içindeki \"screenshots\" alt klasörünün görsellerini videoya karıştırır (adında \"mobile\" olanlar dikey videolar içindir)."
   }
 }

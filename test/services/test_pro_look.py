@@ -234,3 +234,35 @@ class TestBranding(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSequentialReserve(unittest.TestCase):
+    def test_sequential_mode_uses_later_segments_before_looping(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            config.app, {"video_resolution": "720p", "fast_clip_preparation": True}
+        ):
+            long_source = os.path.join(tmp, "long.mp4")
+            audio = os.path.join(tmp, "a.mp3")
+            out = os.path.join(tmp, "combined.mp4")
+            # Colour changes every 4 s so each segment is recognisable.
+            _ffmpeg("-f", "lavfi", "-i", "color=c=red:s=640x360:d=4:r=30",
+                    "-f", "lavfi", "-i", "color=c=green:s=640x360:d=4:r=30",
+                    "-f", "lavfi", "-i", "color=c=blue:s=640x360:d=4:r=30",
+                    "-filter_complex", "[0][1][2]concat=n=3:v=1", "-pix_fmt", "yuv420p", long_source)
+            _ffmpeg("-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "11", audio)
+            with mock.patch.object(video.logger, "warning") as warning:
+                video.combine_videos(
+                    combined_video_path=out,
+                    video_paths=[long_source],
+                    audio_file=audio,
+                    video_aspect=VideoAspect.landscape,
+                    video_concat_mode=VideoConcatMode.sequential,
+                    max_clip_duration=4,
+                    threads=1,
+                )
+            looped = [c for c in warning.call_args_list if "looping clips" in str(c)]
+            self.assertEqual(looped, [])
+            first, second, third = (_frame_rgb(out, t) for t in (2, 6, 10))
+        self.assertGreater(first[0], 200)
+        self.assertGreater(second[1], 100)
+        self.assertGreater(third[2], 200)

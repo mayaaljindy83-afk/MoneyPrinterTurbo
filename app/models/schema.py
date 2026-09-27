@@ -173,6 +173,10 @@ class VideoParams(BaseModel):
     # Folder name inside <storage>/ai_clips with clips made by the Kaggle
     # notebook; they are spread over the timeline in narration order.
     ai_clips_folder: str = ""
+    # Show branding/logo.png in a corner of the whole video.
+    add_logo_watermark: bool = False
+    # Mix framed screenshots from branding/screenshots into the footage.
+    add_site_screenshots: bool = False
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
 

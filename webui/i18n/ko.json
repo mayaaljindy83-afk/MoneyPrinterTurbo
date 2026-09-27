@@ -442,6 +442,10 @@
     "Create Prompts Needs Script": "먼저 영상 대본을 작성하거나 생성하세요.",
     "Creating Prompts": "문단마다 AI 장면 프롬프트를 작성하는 중...",
     "Kaggle Prompts Help": "이 줄들을 Kaggle 노트북의 PROMPTS 셀에 붙여넣으세요(한 줄에 클립 하나).",
-    "Download prompts.txt": "prompts.txt 다운로드"
+    "Download prompts.txt": "prompts.txt 다운로드",
+    "Show Logo Watermark": "영상에 로고 표시",
+    "Show Logo Watermark Help": "이 폴더의 logo.png를 영상 전체의 위쪽 모서리에 표시합니다: {folder}",
+    "Add Website Screenshots": "웹사이트 스크린샷 추가",
+    "Add Website Screenshots Help": "{folder}의 \"screenshots\" 하위 폴더 이미지를 영상에 섞습니다(이름에 \"mobile\"이 있으면 세로 영상에 사용)."
   }
 }

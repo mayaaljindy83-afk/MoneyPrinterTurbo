@@ -442,6 +442,10 @@
     "Create Prompts Needs Script": "Tulis atau buat naskah video terlebih dahulu.",
     "Creating Prompts": "Menulis satu prompt adegan AI per paragraf...",
     "Kaggle Prompts Help": "Tempel baris-baris ini ke sel PROMPTS di notebook Kaggle (satu klip per baris).",
-    "Download prompts.txt": "Unduh prompts.txt"
+    "Download prompts.txt": "Unduh prompts.txt",
+    "Show Logo Watermark": "Tampilkan logo di video",
+    "Show Logo Watermark Help": "Menampilkan logo.png dari folder ini di sudut atas sepanjang video: {folder}",
+    "Add Website Screenshots": "Tambahkan tangkapan layar situs",
+    "Add Website Screenshots Help": "Mencampur gambar dari subfolder \"screenshots\" di {folder} ke video (nama yang berisi \"mobile\" dipakai untuk video vertikal)."
   }
 }

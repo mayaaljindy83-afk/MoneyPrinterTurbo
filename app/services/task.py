@@ -935,6 +935,29 @@ def _mix_in_ai_clips(params, downloaded_videos: list[str]) -> list[str]:
         return downloaded_videos
     clips = ai_clips.list_ai_clips(folder)
     logger.info(f"mixing {len(clips)} AI clips from {folder} into {len(downloaded_videos)} stock clips")
+    if clips:
+        _keep_clip_order(params)
+    return ai_clips.mix_ai_clips(downloaded_videos, clips)
+
+
+def _keep_clip_order(params) -> None:
+    # Random concatenation reshuffles and may drop some sources; added clips
+    # must stay where they were placed, so keep the prepared order instead.
+    params.video_concat_mode = VideoConcatMode.sequential
+
+
+def _mix_in_screenshots(task_id, params, downloaded_videos: list[str], audio_duration: float) -> list[str]:
+    """Spread framed website screenshots (about one per 20 s) over the footage."""
+    from app.models.schema import VideoAspect
+
+    width, height = VideoAspect(params.video_aspect).to_resolution()
+    count = max(1, round(float(audio_duration or 0) / 20))
+    clips = branding.screenshot_clips(width, height, count, utils.task_dir(task_id))
+    if not clips:
+        logger.warning("website screenshots enabled but branding/screenshots has no images")
+        return downloaded_videos
+    logger.info(f"mixing {len(clips)} website screenshots into the video")
+    _keep_clip_order(params)
     return ai_clips.mix_ai_clips(downloaded_videos, clips)
 
 
@@ -1677,6 +1700,8 @@ def _run_pipeline(
         downloaded_videos = order_videos_by_terms(task_id, downloaded_videos, video_terms)
     if downloaded_videos and params.ai_clips_folder:
         downloaded_videos = _mix_in_ai_clips(params, downloaded_videos)
+    if downloaded_videos and params.add_site_screenshots:
+        downloaded_videos = _mix_in_screenshots(task_id, params, downloaded_videos, audio_duration)
     if not downloaded_videos:
         return _mark_task_failed(
             task_id,

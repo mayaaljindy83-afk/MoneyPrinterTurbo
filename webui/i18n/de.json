@@ -442,6 +442,10 @@
     "Create Prompts Needs Script": "Schreibe oder erzeuge zuerst das Videoskript.",
     "Creating Prompts": "Pro Absatz wird ein KI-Szenenprompt geschrieben...",
     "Kaggle Prompts Help": "Füge diese Zeilen in die PROMPTS-Zelle des Kaggle-Notebooks ein (ein Clip pro Zeile).",
-    "Download prompts.txt": "prompts.txt herunterladen"
+    "Download prompts.txt": "prompts.txt herunterladen",
+    "Show Logo Watermark": "Logo im Video zeigen",
+    "Show Logo Watermark Help": "Zeigt logo.png aus diesem Ordner im ganzen Video oben in der Ecke: {folder}",
+    "Add Website Screenshots": "Website-Screenshots hinzufügen",
+    "Add Website Screenshots Help": "Mischt Bilder aus dem Unterordner \"screenshots\" von {folder} ins Video (Namen mit \"mobile\" werden für Hochformat-Videos verwendet)."
   }
 }
