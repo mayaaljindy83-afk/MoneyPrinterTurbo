@@ -269,3 +269,76 @@ class TestKaggleAgent(StorageCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeAgent:
+    """Pretends to be Kaggle: 'renders' every cloud shot as a colour clip."""
+
+    def run_job(self, job_id, on_status=None, max_runs=4):
+        root = job_package.job_dir(job_id)
+        with open(os.path.join(root, "package", "job.json"), encoding="utf-8") as fp:
+            job = json.load(fp)
+        os.makedirs(os.path.join(root, "output", "shots"), exist_ok=True)
+        for shot in job["shots"]:
+            subprocess.run([FFMPEG, "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                            f"color=c=teal:s=832x480:r=25:d={shot['duration'] + 0.3}", "-pix_fmt", "yuv420p",
+                            os.path.join(root, "output", "shots", f"{shot['id']}.mp4")], check=True)
+        if on_status:
+            on_status("complete")
+        return {"total": len(job["shots"]), "done": len(job["shots"]), "complete": True}
+
+
+class TestStudioFlow(StorageCase):
+    def test_background_render_to_final_video(self):
+        from app.services.presenter import studio
+
+        self._presenter()
+        plan = studio.plan_video("Test", "Hello and welcome. This is a short test. Thanks for watching.",
+                                 "en-US", "9:16", "Lina", generate=lambda p: "[]")
+        job_id = plan["job_id"]
+        with mock.patch.object(job_package.voice, "tts", _fake_tts), \
+                mock.patch.object(job_package.voice, "create_subtitle", _fake_subtitle), \
+                mock.patch.dict(config.app, {"video_resolution": "720p"}):
+            studio.start_kaggle_render(job_id, "token", {"bgm_type": "", "subtitle_style": "boxed"},
+                                       agent=FakeAgent())
+            studio._threads[job_id].join(timeout=300)
+        status = studio.read_status(job_id)
+        self.assertEqual(status["state"], "done", status)
+        with VideoFileClip(status["final"]) as clip:
+            self.assertEqual(clip.size, [720, 1280])
+        self.assertIn("the video is ready", status["log"][-1])
+
+    def test_edit_shots_and_import_results(self):
+        from app.services.presenter import studio
+
+        self._presenter()
+        plan = studio.plan_video("Test", "One. Two three four five six seven. Eight nine ten.", "en-US", "16:9",
+                                 "Lina", generate=lambda p: "[]")
+        edited = studio.update_shots(plan["job_id"], [
+            {"type": "walk", "narration": "First part"}, {"type": "TALK", "narration": "  "},
+            {"type": "BAD", "narration": "Second part"}])
+        self.assertEqual([(s["id"], s["type"]) for s in edited["shots"]], [("s01", "WALK"), ("s02", "TALK")])
+        import io
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("output/shots/s01.mp4", b"x")
+            zf.writestr("output/frames/s01.png", b"x")
+            zf.writestr("output/summary.json", "{}")
+            zf.writestr("../../evil.txt", "x")
+        self.assertEqual(studio.import_results(plan["job_id"], buffer.getvalue()), 1)
+        root = job_package.job_dir(plan["job_id"])
+        self.assertTrue(os.path.isfile(os.path.join(root, "output", "frames", "s01.png")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "evil.txt")))
+        self.assertEqual(studio.rendered_shots(plan["job_id"]), ["s01.mp4"])
+
+
+class TestTenSecondJob(StorageCase):
+    def test_test_job_is_about_ten_seconds(self):
+        from app.services.presenter import studio
+
+        self._presenter()
+        plan = studio.test_job("Lina", "ar-SA")
+        self.assertEqual([s["type"] for s in plan["shots"]], ["TALK", "WALK"])
+        seconds = sum(planner.estimate_seconds(s["narration"], "ar") for s in plan["shots"])
+        self.assertTrue(5 <= seconds <= 12, seconds)

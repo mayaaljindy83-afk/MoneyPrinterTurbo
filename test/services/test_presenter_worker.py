@@ -329,3 +329,30 @@ class TestWorkerOrchestration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPresenterNotebook(unittest.TestCase):
+    def test_committed_colab_notebook_matches_worker(self):
+        spec = importlib.util.spec_from_file_location("build_notebook", os.path.join(ROOT, "kaggle", "build_notebook.py"))
+        builder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(builder)
+        with open(builder.PRESENTER_COLAB_NOTEBOOK, encoding="utf-8") as fp:
+            committed = json.load(fp)
+        self.assertEqual(committed, builder.build_presenter_colab(), "run: python kaggle/build_notebook.py")
+        sources = ["".join(cell["source"]) for cell in committed["cells"]]
+        self.assertTrue(any(s.startswith("%%writefile /content/presenter_worker.py") for s in sources))
+
+    def test_colab_output_is_per_job(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = os.path.join(tmp, "job")
+            os.makedirs(job_dir)
+            with open(os.path.join(job_dir, "job.json"), "w") as fp:
+                json.dump({"job_id": "abc", "kind": "create_presenter", "prompt": "x"}, fp)
+            paths = {"out": os.path.join(tmp, "out"), "work": os.path.join(tmp, "work"),
+                     "comfy": os.path.join(tmp, "comfy"), "cache_dirs": []}
+            created = []
+            with mock.patch.object(pw, "detect_platform", return_value="colab"), \
+                    mock.patch.object(pw, "default_paths", return_value=paths), \
+                    mock.patch.object(pw.Worker, "create_presenter", lambda self: created.append(self.out)):
+                pw.main(["--job", job_dir, "--skip-setup"])
+            self.assertEqual(created, [os.path.join(tmp, "out", "abc")])

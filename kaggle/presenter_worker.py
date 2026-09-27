@@ -835,13 +835,13 @@ class Worker:
                 target = os.path.join(out, f"candidate_{i + 1}.png")
                 if os.path.isfile(target):
                     continue
-                for label, (w, h), extra in (("portrait", (832, 1216), "full body, standing, facing the camera"),
-                                              ("face", (1024, 1024), "head and shoulders portrait, facing the camera")):
-                    images = self.comfy.run(build_portrait_workflow(
-                        f"{self.job['prompt']}, {extra}, plain light grey studio background, photorealistic, "
-                        "natural skin texture, soft studio light, 85mm photo",
-                        w, h, f"cand{i}_{label}", self.seed + i))
-                    shutil.move(images[-1], os.path.join(out, f"candidate_{i + 1}{'' if label == 'portrait' else '_face'}.png"))
+                # One knees-up photo per candidate: face and outfit both stay clear, and a
+                # second, separately generated close-up would show a different person.
+                images = self.comfy.run(build_portrait_workflow(
+                    f"{self.job['prompt']}, three-quarter shot from the knees up, standing, facing the camera, "
+                    "plain light grey studio background, photorealistic, natural skin texture, soft studio light",
+                    832, 1216, f"cand{i}", self.seed + i))
+                shutil.move(images[-1], target)
                 log(f"candidate {i + 1}/{count} ready")
         finally:
             self.comfy.stop()
@@ -875,13 +875,16 @@ def main(argv=None) -> int:
     parser.add_argument("--skip-setup", action="store_true")
     args = parser.parse_args(argv)
 
-    os.makedirs(args.out, exist_ok=True)
-    log = Log(os.path.join(args.out, "worker.log"))
     job_dir = args.job or ("/kaggle/input" if platform == "kaggle" else "")
     if not job_dir:
         raise SystemExit("No job found. Attach the job dataset or pass --job.")
     job = load_job(job_dir, args.work)
     args.cache.append(job["_root"])  # package/previous holds finished shots of an earlier run
+    if platform != "kaggle" and args.out == paths["out"]:
+        # A kept folder (Google Drive) holds many jobs; never mix their shots.
+        args.out = os.path.join(args.out, job.get("job_id") or "job")
+    os.makedirs(args.out, exist_ok=True)
+    log = Log(os.path.join(args.out, "worker.log"))
     log(f"platform={platform} job={job.get('job_id')} kind={job.get('kind', 'video')}")
 
     if not args.skip_setup:
