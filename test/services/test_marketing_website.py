@@ -86,7 +86,8 @@ class TestServicePage(LocalSite):
         self.assertEqual(data["mode"], "service")
         self.assertEqual(data["service"]["name"], "خدمة التدقيق الأكاديمي")
         self.assertEqual(data["dir"], "rtl")
-        self.assertIn("48 ساعة", data["service"]["description"])
+        # The visible intro under the heading (in the page's language), not the <meta> tag.
+        self.assertEqual(data["service"]["description"], "نراجع بحثك لغوياً وأكاديمياً ونضمن سلامة المراجع والتنسيق.")
         self.assertEqual(data["brand"]["name"], "QAI-VO")
         self.assertIn("#10b981", data["brand"]["colors"])
         benefit_texts = [b["text"] for b in data["benefits"]]
@@ -104,7 +105,14 @@ class TestServicePage(LocalSite):
             image = Image.open(os.path.join(self.out, shot["path"]))
             self.assertGreater(image.width, 10)
         card = next(s for s in data["screenshots"] if s["kind"] == "card")
-        self.assertEqual(Image.open(os.path.join(self.out, card["path"])).width, 332)  # 300 + padding
+        # Cards are the real components drawn alone: 2x resolution, transparent margin for shadows.
+        self.assertTrue(card.get("layer"))
+        layer = Image.open(os.path.join(self.out, card["path"]))
+        self.assertEqual(layer.width, (332 + 48) * 2)  # 300 + padding, plus the 24 px margin, at 2x
+        self.assertEqual(layer.getpixel((2, 2))[3], 0)  # transparent around the card
+        self.assertEqual(layer.getpixel((layer.width // 2, layer.height // 2))[:3], (30, 41, 59))  # its own colour
+        kinds = [s["kind"] for s in data["screenshots"] if s.get("layer")]
+        self.assertEqual(sorted(set(kinds)), ["card", "cta", "description", "heading", "logo"])
         # Saved and loadable.
         self.assertEqual(website.load_website(self.out)["service"]["name"], data["service"]["name"])
         # Footer / navigation text is not a marketing fact.
@@ -165,3 +173,54 @@ class TestHelpers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestScreenshotTimeouts(LocalSite):
+    """A page whose screenshots hang (seen on Windows with a local Next.js build) must still be analysed."""
+
+    def _timeout(self, *args, **kwargs):
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+        raise PlaywrightTimeout("Page.screenshot: Timeout 30000ms exceeded.")
+
+    def test_page_screenshots_time_out_components_still_rendered(self):
+        from playwright.sync_api import Page
+
+        with mock.patch.object(Page, "screenshot", autospec=True, side_effect=self._timeout) as shot:
+            data = website.read_website(self.base + "/service.html", self.out, locale="ar")
+        self.assertGreaterEqual(shot.call_count, 2)  # tried, then retried once per image
+        ids = {s["id"] for s in data["screenshots"]}
+        self.assertFalse({"hero", "page", "mobile"} & ids)
+        self.assertTrue({"heading", "card1", "card2", "cta1", "logo"} <= ids)  # independent layers
+        self.assertEqual(data["service"]["name"], "خدمة التدقيق الأكاديمي")
+        self.assertIn("سرعة التسليم", [b["text"] for b in data["benefits"]])
+        self.assertEqual(data["cta"][0]["text"], "اشترك الآن")
+        self.assertIn("#10b981", data["brand"]["colors"])
+        self.assertTrue(any("hero.png" in w for w in data["screenshot_warnings"]))
+        self.assertIn("running_animations", data["render_diagnostics"])
+
+    def test_no_image_at_all_still_completes(self):
+        from playwright.sync_api import Locator, Page
+
+        with mock.patch.object(Page, "screenshot", autospec=True, side_effect=self._timeout), \
+                mock.patch.object(Locator, "screenshot", autospec=True, side_effect=self._timeout):
+            data = website.read_website(self.base + "/service.html", self.out, portrait=False)
+        self.assertEqual(data["screenshots"], [])
+        self.assertEqual(data["service"]["name"], "خدمة التدقيق الأكاديمي")
+        self.assertTrue(data["benefits"] and data["cta"] and data["texts"])
+
+    def test_full_page_fails_then_viewport_retry_works(self):
+        from playwright.sync_api import Page
+
+        real = Page.screenshot
+
+        def full_page_hangs(page, *args, **kwargs):
+            if kwargs.get("full_page"):
+                self._timeout()
+            return real(page, *args, **kwargs)
+
+        with mock.patch.object(Page, "screenshot", autospec=True, side_effect=full_page_hangs):
+            data = website.read_website(self.base + "/service.html", self.out, portrait=False)
+        ids = {s["id"] for s in data["screenshots"]}
+        self.assertTrue({"hero", "page"} <= ids)  # page.png = the visible part
+        self.assertTrue(any("only the visible part" in w for w in data["screenshot_warnings"]))

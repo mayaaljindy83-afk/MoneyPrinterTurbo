@@ -347,6 +347,14 @@ def render_scene(spec: dict, output: str, width: int, height: int, seconds: floa
         item = turn(item, 0.06, "left" if (index % 2) else "right")
         item, pad = with_shadow(item, blur=12, glow=pal["accent"] if big else None)
         layers.append((item, _clamp(sw * fx - pad[0], sh * fy - pad[1], item, sw, sh, pad[0]), 1.0, "card", index))
+    heading = spec.get("heading")
+    if heading and os.path.isfile(heading) and style in ("world", "point"):
+        # The page's real heading as its own layer, floating in front of the screen.
+        title = card(heading, int(sw * (0.40 if height > width else 0.34)), int(sh * 0.14))
+        title, pad = with_shadow(title, blur=12, opacity=0.4)
+        fx, fy = plan["screen"][0] + 0.02, max(0.02, plan["screen"][1] - 0.05)
+        layers.append((title, _clamp(sw * fx - pad[0], sh * fy - pad[1], title, sw, sh, pad[0]), 0.9, "card",
+                       len(card_paths)))
     if style == "cta" and spec.get("logo") and os.path.isfile(spec["logo"]):
         logo = card(spec["logo"], int(sw * 0.30), int(sh * 0.14))
         logo, pad = with_shadow(logo, blur=10, opacity=0.35)
