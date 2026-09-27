@@ -105,9 +105,15 @@ if ((Test-Path "config.toml") -and (Test-Path ".venv\Scripts\python.exe")) {
     if ($existing) { $suggested = $existing }
 }
 Write-Host "  Everything heavy (videos, downloaded clips, the AI model ~3-7 GB) goes here."
-$DataDir = Read-Host "  Data folder [press Enter for $suggested]"
-if ([string]::IsNullOrWhiteSpace($DataDir)) { $DataDir = $suggested }
-$DataDir = $DataDir.Trim().Trim('"')
+# Only a full folder path is accepted: a command pasted by mistake (e.g. "start.bat") would
+# otherwise become the data folder.
+while ($true) {
+    $DataDir = Read-Host "  Data folder [press Enter for $suggested]"
+    if ([string]::IsNullOrWhiteSpace($DataDir)) { $DataDir = $suggested }
+    $DataDir = $DataDir.Trim().Trim('"')
+    if ($DataDir -match '^[A-Za-z]:\\' -and $DataDir -notmatch '\.(bat|cmd|exe|ps1)$') { break }
+    Warn "Please type a full folder path like E:\MoneyPrinterData (or just press Enter)."
+}
 try { New-Item -ItemType Directory -Force -Path $DataDir -ErrorAction Stop | Out-Null } catch { Fail "Cannot create folder $DataDir" }
 foreach ($sub in @("temp", "pip-cache", "ollama-models", "music", "branding", "playwright-browsers")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $DataDir $sub) | Out-Null
