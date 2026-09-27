@@ -196,26 +196,54 @@ class KaggleAgent:
                 return json.load(fp)
         return {}
 
-    def run_job(self, job_id: str, max_runs: int = 4, on_status=None) -> dict:
-        """Upload, run, download and repeat until every shot is rendered."""
+    def run_job(self, job_id: str, max_runs: int = 4, on_status=None, continuing: bool = False) -> dict:
+        """Upload, run, download and repeat until every shot is rendered.
+
+        ``continuing``: an earlier run already produced output, so the first
+        upload carries its finished shots too.
+        """
         summary: dict = {}
         for attempt in range(1, max_runs + 1):
-            if attempt > 1:
+            if attempt > 1 or continuing:
                 kept = job_package.stage_previous_output(job_id)
                 self.log(f"run {attempt}: {kept} shots already done, continuing with the rest")
             dataset = self.upload_job(job_id)
             kernel = self.push_worker(job_id, dataset)
-            status = self.wait(kernel, on_status=on_status)
-            summary = self.download(job_id, kernel)
-            if summary.get("complete") or self._is_presenter_job(job_id):
-                self.log("all shots are ready")
+            summary, finished = self._collect(job_id, kernel, on_status)
+            if finished:
                 return summary
-            if status == "error" and not summary.get("done"):
-                raise KaggleError(
-                    f"The Kaggle run failed before making any shot. Open https://www.kaggle.com/code/{kernel} "
-                    "and look at the log (Output / Logs).")
-            self.log(f"{summary.get('done', 0)}/{summary.get('total', '?')} shots ready; starting another run")
         return summary
+
+    def resume(self, job_id: str, max_runs: int = 4, on_status=None) -> dict:
+        """Pick a job up again after the laptop was off or the program closed.
+
+        The run on Kaggle keeps going without the laptop: wait for it if it
+        is still running, download what it made, and start more runs only if
+        shots are still missing.
+        """
+        kernel = self._state(job_id).get("kernel")
+        if not kernel:
+            self.log("this job was never sent to Kaggle; sending it now")
+            return self.run_job(job_id, max_runs=max_runs, on_status=on_status)
+        self.log(f"checking the last Kaggle run: https://www.kaggle.com/code/{kernel}")
+        summary, finished = self._collect(job_id, kernel, on_status)
+        if finished or max_runs <= 1:
+            return summary
+        return self.run_job(job_id, max_runs=max_runs - 1, on_status=on_status, continuing=True)
+
+    def _collect(self, job_id: str, kernel: str, on_status=None) -> tuple[dict, bool]:
+        """Wait for ``kernel``, download its output; (summary, all done?)."""
+        status = self.wait(kernel, on_status=on_status)
+        summary = self.download(job_id, kernel)
+        if summary.get("complete") or (self._is_presenter_job(job_id) and status == "complete"):
+            self.log("all shots are ready")
+            return summary, True
+        if status == "error" and not summary.get("done"):
+            raise KaggleError(
+                f"The Kaggle run failed before making any shot. Open https://www.kaggle.com/code/{kernel} "
+                "and look at the log (Output / Logs).")
+        self.log(f"{summary.get('done', 0)}/{summary.get('total', '?')} shots ready; starting another run")
+        return summary, False
 
     # -- helpers --------------------------------------------------------------------
     def _is_presenter_job(self, job_id: str) -> bool:
