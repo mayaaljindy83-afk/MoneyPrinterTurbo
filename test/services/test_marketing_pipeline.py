@@ -176,7 +176,8 @@ class TestWebsiteAdPipeline(unittest.TestCase):
         self.assertGreater(np.where(red.any(axis=0))[0].mean(), 640)  # ...on the right for Arabic
         green = (first[..., 1] > 200) & (first[..., 0] < 60) & (first[..., 2] < 60)
         self.assertLess(green.sum(), 50)  # no green screen left
-        self.assertGreater(last[360, 640].sum(), 300)  # the real page fills the last scene
+        button = (np.abs(last.astype(int) - (16, 185, 129)).sum(axis=2) < 60)
+        self.assertGreater(button.sum(), 200)  # the real page (with its green button) fills the last scene
         job = json.load(open(os.path.join(job_package.job_dir(job_id), "package", "job.json"), encoding="utf-8"))
         self.assertEqual([(s["type"], bool(s.get("green")), bool(s.get("local"))) for s in job["shots"]],
                          [("TALK", True, False), ("BROLL", False, True)])
