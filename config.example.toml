@@ -42,6 +42,13 @@ bgm_prefer_user_music = false
 # fast on a laptop CPU and downloads much smaller stock clips.
 video_resolution = "1080p"
 
+# Speed-ups for weak CPUs (both are safe to leave off):
+# fast_clip_preparation = true cuts/scales source clips with FFmpeg instead of
+# MoviePy, several times faster for long videos.
+fast_clip_preparation = false
+# libx264 preset: "" (FFmpeg default "medium"), "veryfast", "ultrafast"...
+video_encode_preset = ""
+
 # Folder holding intro.* / outro.* (mp4, mov, png, jpg...) that are added
 # when "intro/outro" is enabled for a video. Empty = <storage_dir>/branding.
 branding_dir = ""

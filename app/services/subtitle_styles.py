@@ -47,7 +47,7 @@ SUBTITLE_STYLES: dict[str, dict] = {
         "font_size": 84,
         "text_fore_color": "#FFFFFF",
         "stroke_color": "#000000",
-        "stroke_width": 5,
+        "stroke_width": 6,
         "text_background_color": False,
         "rounded_subtitle_background": False,
         "subtitle_position": "two_thirds_bottom",

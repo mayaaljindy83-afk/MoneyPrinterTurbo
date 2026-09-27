@@ -393,6 +393,29 @@ def _get_temp_audio_dir(output_dir: str) -> str:
     return output_dir
 
 
+def _get_x264_preset() -> str:
+    """libx264 speed preset from ``[app] video_encode_preset`` ("" = FFmpeg default).
+
+    Every video is encoded three times (clip pieces, concat, final render), so
+    "veryfast" roughly halves the total time on a weak laptop CPU at a small
+    cost in file size. Only applied to libx264; hardware encoders use other
+    preset names.
+    """
+    preset = str(config.app.get("video_encode_preset", "") or "").strip().lower()
+    allowed = {
+        "ultrafast", "superfast", "veryfast", "faster", "fast",
+        "medium", "slow", "slower", "veryslow",
+    }
+    return preset if preset in allowed else ""
+
+
+def _with_x264_preset(codec: str, kwargs: dict) -> dict:
+    preset = _get_x264_preset()
+    if codec == _DEFAULT_VIDEO_CODEC and preset and "preset" not in kwargs:
+        return {**kwargs, "preset": preset}
+    return kwargs
+
+
 def _fallback_write_videofile(clip, output_file: str, failed_codec: str, reason: str, **kwargs):
     """
     硬件编码失败后用 libx264 重试，只有重试成功才禁用该硬件编码器。
@@ -401,7 +424,11 @@ def _fallback_write_videofile(clip, output_file: str, failed_codec: str, reason:
     文件被占用、目录权限、杀软拦截等通用 IO 问题。只有 libx264 能成功写出时，
     才能判断原始失败大概率来自硬件编码器本身，避免误伤后续任务。
     """
-    clip.write_videofile(output_file, codec=_DEFAULT_VIDEO_CODEC, **kwargs)
+    clip.write_videofile(
+        output_file,
+        codec=_DEFAULT_VIDEO_CODEC,
+        **_with_x264_preset(_DEFAULT_VIDEO_CODEC, kwargs),
+    )
     _disable_runtime_video_codec(failed_codec, reason)
     return _DEFAULT_VIDEO_CODEC
 
@@ -415,7 +442,11 @@ def _write_videofile_with_codec_fallback(clip, output_file: str, codec: str, **k
     """
     effective_codec = _get_effective_video_codec(codec)
     try:
-        clip.write_videofile(output_file, codec=effective_codec, **kwargs)
+        clip.write_videofile(
+            output_file,
+            codec=effective_codec,
+            **_with_x264_preset(effective_codec, kwargs),
+        )
         return effective_codec
     except Exception as exc:
         if effective_codec == _DEFAULT_VIDEO_CODEC:
@@ -511,6 +542,8 @@ def concat_video_clips_with_ffmpeg(
             "-pix_fmt",
             "yuv420p",
         ]
+        if codec == _DEFAULT_VIDEO_CODEC and _get_x264_preset():
+            command.extend(["-preset", _get_x264_preset()])
         if max_duration is not None and max_duration > 0:
             command.extend(["-t", f"{max_duration:.3f}"])
         command.append(output_file)
@@ -747,6 +780,64 @@ def _fit_clip_to_canvas(
 _CROSSFADE_SECONDS = 0.6
 
 
+def _fast_clip_preparation_enabled() -> bool:
+    """``[app] fast_clip_preparation``: cut, scale and crop clips with FFmpeg.
+
+    MoviePy resizes every frame in Python, which makes the clip-combining step
+    the slowest part of a long video on a laptop CPU. FFmpeg does the same
+    cut/scale/crop/frame-rate work natively, several times faster. Off by
+    default to keep upstream behaviour; the Windows installer enables it.
+    """
+    return bool(config.app.get("fast_clip_preparation", False))
+
+
+def _prepare_segment_with_ffmpeg(
+    source_file: str,
+    start_time: float,
+    end_time: float,
+    target_width: int,
+    target_height: int,
+    fit_mode: VideoFitMode | str,
+    clip_speed: float,
+    output_file: str,
+) -> bool:
+    """Write ``source[start:end]`` already sized for the canvas. Returns success."""
+    source_duration = float(end_time) - float(start_time)
+    if source_duration <= 0:
+        return False
+    w, h = int(target_width), int(target_height)
+    if VideoFitMode(fit_mode) == VideoFitMode.cover:
+        scale = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+    else:
+        scale = (
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
+        )
+    filters = f"{scale},setsar=1,fps={fps},format=yuv420p"
+    if clip_speed != 1.0:
+        filters = f"setpts=PTS/{clip_speed:.6f},{filters}"
+    command = [
+        get_ffmpeg_binary(), "-y", "-loglevel", "error",
+        "-ss", f"{float(start_time):.3f}", "-t", f"{source_duration:.3f}",
+        "-i", source_file, "-an", "-vf", filters,
+        # Intermediate file: fastest preset, near-lossless quality.
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+        output_file,
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logger.warning(f"ffmpeg clip preparation unavailable: {exc}")
+        return False
+    if result.returncode != 0 or not os.path.isfile(output_file) or os.path.getsize(output_file) == 0:
+        logger.warning(
+            "ffmpeg clip preparation failed, falling back to MoviePy: "
+            f"{(result.stderr or '').strip()[-300:]}"
+        )
+        return False
+    return True
+
+
 def _crossfade_from_previous(
     clip,
     previous: SubClippedVideoClip,
@@ -754,6 +845,7 @@ def _crossfade_from_previous(
     target_width: int,
     target_height: int,
     fit_mode: VideoFitMode,
+    tail_file: str = "",
 ):
     """Dissolve the end of the previous shot over the start of ``clip``.
 
@@ -764,6 +856,26 @@ def _crossfade_from_previous(
     Returns the new clip and the opened source that must be closed later.
     """
     duration = min(_CROSSFADE_SECONDS, clip.duration / 3)
+    if tail_file and previous.end_time and _prepare_segment_with_ffmpeg(
+        previous.file_path,
+        previous.end_time,
+        previous.end_time + duration * clip_speed,
+        target_width,
+        target_height,
+        fit_mode,
+        clip_speed,
+        tail_file,
+    ):
+        source = _open_video_clip_quietly(tail_file)
+        if source.duration >= duration * 0.9:
+            tail = source.with_duration(min(duration, source.duration))
+            tail = tail.with_effects([vfx.CrossFadeOut(tail.duration)]).with_start(0)
+            blended = CompositeVideoClip(
+                [clip, tail], size=(target_width, target_height), use_bgclip=True
+            ).with_duration(clip.duration)
+            return blended, source
+        close_clip(source)
+
     source = _open_video_clip_quietly(previous.file_path)
     tail_start = min(previous.end_time or source.duration, source.duration)
     tail_end = min(source.duration, tail_start + duration * clip_speed)
@@ -892,15 +1004,35 @@ def combine_videos(
         )
         
         crossfade_source = None
+        segment_file = ""
+        tail_file = ""
+        if _fast_clip_preparation_enabled():
+            segment_file = f"{output_dir}/temp-seg-{i+1}.mp4"
+            tail_file = f"{output_dir}/temp-tail-{i+1}.mp4"
+            if not _prepare_segment_with_ffmpeg(
+                subclipped_item.file_path,
+                subclipped_item.start_time,
+                subclipped_item.end_time,
+                video_width,
+                video_height,
+                fit_mode,
+                normalized_clip_speed,
+                segment_file,
+            ):
+                segment_file = ""
         try:
-            clip = _open_video_clip_quietly(subclipped_item.file_path).subclipped(
-                subclipped_item.start_time, subclipped_item.end_time
-            )
-            # 播放速度属于素材本身属性，应在转场前应用。这样 Fade/Slide 等一秒转场
-            # 不会跟随素材速度变成 0.5 秒或 2 秒；后续最大时长裁剪继续作为
-            # 浮点误差或异常素材时长的安全兜底，保证最终片段不突破配置上限。
-            if normalized_clip_speed != 1.0:
-                clip = clip.with_speed_scaled(normalized_clip_speed)
+            if segment_file:
+                # Already cut, sped up and sized for the canvas by FFmpeg.
+                clip = _open_video_clip_quietly(segment_file)
+            else:
+                clip = _open_video_clip_quietly(subclipped_item.file_path).subclipped(
+                    subclipped_item.start_time, subclipped_item.end_time
+                )
+                # 播放速度属于素材本身属性，应在转场前应用。这样 Fade/Slide 等一秒转场
+                # 不会跟随素材速度变成 0.5 秒或 2 秒；后续最大时长裁剪继续作为
+                # 浮点误差或异常素材时长的安全兜底，保证最终片段不突破配置上限。
+                if normalized_clip_speed != 1.0:
+                    clip = clip.with_speed_scaled(normalized_clip_speed)
             # Normalize every source clip before transitions are applied. In cover mode
             # the clip fills the canvas and the excess edges are cropped; contain keeps
             # the complete source frame and uses black bars for the unused area.
@@ -958,6 +1090,7 @@ def combine_videos(
                     video_width,
                     video_height,
                     fit_mode,
+                    tail_file=tail_file,
                 )
 
             if clip.duration > max_clip_duration:
@@ -995,6 +1128,8 @@ def combine_videos(
             if crossfade_source is not None:
                 close_clip(crossfade_source)
             logger.error(f"failed to process clip: {str(e)}")
+        finally:
+            delete_files([f for f in (segment_file, tail_file) if f and os.path.exists(f)])
     
     # loop processed clips until the video duration covers the audio duration and the small safety margin.
     if video_duration < required_video_duration:

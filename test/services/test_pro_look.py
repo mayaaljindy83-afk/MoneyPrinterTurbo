@@ -33,6 +33,12 @@ def _frame_rgb(path, t):
     return frame[frame.shape[0] // 2, frame.shape[1] // 2].astype(int)
 
 
+def _frame_rgb_at(path, t, y):
+    with VideoFileClip(path) as clip:
+        frame = clip.get_frame(t)
+    return frame[y, frame.shape[1] // 2].astype(int)
+
+
 class TestResolution(unittest.TestCase):
     def test_default_is_1080p(self):
         with mock.patch.dict(config.app, {"video_resolution": ""}):
@@ -69,8 +75,15 @@ class TestSubtitleStyles(unittest.TestCase):
 
 class TestCrossfade(unittest.TestCase):
     def test_previous_shot_dissolves_into_next(self):
+        self._check_crossfade(fast=False)
+
+    def test_crossfade_with_ffmpeg_clip_preparation(self):
+        self._check_crossfade(fast=True)
+
+    def _check_crossfade(self, fast):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
-            config.app, {"video_resolution": "720p"}
+            config.app,
+            {"video_resolution": "720p", "fast_clip_preparation": fast, "video_encode_preset": "veryfast"},
         ):
             red = os.path.join(tmp, "red.mp4")
             blue = os.path.join(tmp, "blue.mp4")
@@ -102,6 +115,51 @@ class TestCrossfade(unittest.TestCase):
         self.assertGreater(blend[2], 50)
         self.assertLess(after[0], 60)
         self.assertGreater(after[2], 200)
+
+
+class TestFastClipPreparation(unittest.TestCase):
+    def test_segment_is_cut_scaled_and_sped_up(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "src.mp4")
+            out = os.path.join(tmp, "seg.mp4")
+            _color_video(src, "red", 6, size="1920x1080")
+            ok = video._prepare_segment_with_ffmpeg(
+                src, 1.0, 5.0, 720, 1280, "cover", 2.0, out
+            )
+            self.assertTrue(ok)
+            with VideoFileClip(out) as clip:
+                self.assertEqual(clip.size, [720, 1280])
+                self.assertAlmostEqual(clip.duration, 2.0, delta=0.1)
+                self.assertIsNone(clip.audio)
+
+    def test_contain_mode_letterboxes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "src.mp4")
+            out = os.path.join(tmp, "seg.mp4")
+            _color_video(src, "white", 2, size="1920x1080")
+            self.assertTrue(
+                video._prepare_segment_with_ffmpeg(src, 0, 2, 720, 1280, "contain", 1.0, out)
+            )
+            top = _frame_rgb_at(out, 0.5, 20)
+            self.assertTrue(all(c < 30 for c in top))  # black bar
+            self.assertTrue(all(c > 220 for c in _frame_rgb(out, 0.5)))
+
+    def test_failure_returns_false(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(
+                video._prepare_segment_with_ffmpeg(
+                    os.path.join(tmp, "missing.mp4"), 0, 2, 720, 1280, "cover", 1.0,
+                    os.path.join(tmp, "out.mp4"),
+                )
+            )
+
+    def test_x264_preset_setting(self):
+        with mock.patch.dict(config.app, {"video_encode_preset": "VeryFast"}):
+            self.assertEqual(video._get_x264_preset(), "veryfast")
+            self.assertEqual(video._with_x264_preset("libx264", {}), {"preset": "veryfast"})
+            self.assertEqual(video._with_x264_preset("h264_nvenc", {}), {})
+        with mock.patch.dict(config.app, {"video_encode_preset": "bogus"}):
+            self.assertEqual(video._get_x264_preset(), "")
 
 
 class TestBranding(unittest.TestCase):
