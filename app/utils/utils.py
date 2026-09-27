@@ -90,8 +90,25 @@ def root_dir():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 
+def storage_root() -> str:
+    """Root folder for tasks, caches and generated videos.
+
+    Defaults to ``<project>/storage``. Set ``MPT_STORAGE_DIR`` or
+    ``[app] storage_dir`` in config.toml to keep all heavy data on another
+    drive (e.g. ``E:/MoneyPrinterData`` on a laptop with a small SSD).
+    """
+    configured = os.environ.get("MPT_STORAGE_DIR", "").strip()
+    if not configured:
+        from app.config import config
+
+        configured = str(config.app.get("storage_dir", "") or "").strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(os.path.expandvars(configured)))
+    return os.path.join(root_dir(), "storage")
+
+
 def storage_dir(sub_dir: str = "", create: bool = False):
-    d = os.path.join(root_dir(), "storage")
+    d = storage_root()
     if sub_dir:
         d = os.path.join(d, sub_dir)
     if create and not os.path.exists(d):

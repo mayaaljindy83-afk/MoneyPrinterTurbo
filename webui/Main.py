@@ -1823,7 +1823,7 @@ def open_task_folder(task_id):
         # 通过路径拼接访问任务目录之外的位置，也避免后续打开目录时触发
         # 平台 shell 对特殊字符的解释。
         normalized_task_id = str(UUID(str(task_id)))
-        tasks_root = os.path.abspath(os.path.join(root_dir, "storage", "tasks"))
+        tasks_root = os.path.abspath(utils.task_dir())
         path = os.path.abspath(os.path.join(tasks_root, normalized_task_id))
 
         # 即使 UUID 校验通过，也再次确认最终路径仍在任务根目录内，避免

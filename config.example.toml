@@ -25,6 +25,19 @@ listen_port = 8080
 # 应由 API 客户端携带请求头下载。
 api_key = ""
 
+# Where tasks, caches and generated videos are stored. Empty = ./storage.
+# Point it at a bigger drive, e.g. "E:/MoneyPrinterData". The environment
+# variable MPT_STORAGE_DIR overrides this value.
+storage_dir = ""
+
+# Folder with your own royalty-free background music (mp3/wav/m4a...).
+# Empty = <storage_dir>/bgm.
+music_dir = ""
+
+# When true and music_dir contains tracks, random background music is picked
+# only from your folder (the bundled songs have no documented licence).
+bgm_prefer_user_music = false
+
 # -----------------------------------------------------------------------------
 # General / 通用设置
 # -----------------------------------------------------------------------------
