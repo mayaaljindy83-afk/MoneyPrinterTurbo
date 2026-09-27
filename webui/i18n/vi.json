@@ -433,6 +433,15 @@
     "Subtitle Style shorts_bold": "Shorts đậm (to, ở giữa)",
     "Subtitle Style minimal": "Tối giản",
     "Video Quality": "Chất lượng video",
-    "Video Quality Help": "1080p cho chất lượng tốt nhất. 720p kết xuất nhanh hơn khoảng gấp đôi trên CPU laptop và tải các clip nhỏ hơn."
+    "Video Quality Help": "1080p cho chất lượng tốt nhất. 720p kết xuất nhanh hơn khoảng gấp đôi trên CPU laptop và tải các clip nhỏ hơn.",
+    "AI Clips (Kaggle)": "Clip AI (Kaggle)",
+    "AI Clips Folder": "Thư mục clip AI",
+    "AI Clips Folder Help": "Clip tạo bằng notebook Kaggle miễn phí (xem kaggle/README-ar.md). Giải nén vào một thư mục con của: {folder}",
+    "AI Clips Count": "{count} clip AI sẽ được chèn vào video theo thứ tự lời dẫn.",
+    "Create Prompts for Kaggle": "Tạo prompt cho Kaggle",
+    "Create Prompts Needs Script": "Hãy viết hoặc tạo kịch bản video trước.",
+    "Creating Prompts": "Đang viết một prompt cảnh AI cho mỗi đoạn...",
+    "Kaggle Prompts Help": "Dán các dòng này vào ô PROMPTS của notebook Kaggle (mỗi dòng một clip).",
+    "Download prompts.txt": "Tải prompts.txt"
   }
 }

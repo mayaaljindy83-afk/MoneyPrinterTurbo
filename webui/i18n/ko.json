@@ -433,6 +433,15 @@
     "Subtitle Style shorts_bold": "쇼츠 굵게(크게, 가운데)",
     "Subtitle Style minimal": "미니멀",
     "Video Quality": "영상 화질",
-    "Video Quality Help": "1080p는 최고 화질입니다. 720p는 노트북 CPU에서 약 두 배 빠르게 렌더링되며 더 작은 스톡 클립을 내려받습니다."
+    "Video Quality Help": "1080p는 최고 화질입니다. 720p는 노트북 CPU에서 약 두 배 빠르게 렌더링되며 더 작은 스톡 클립을 내려받습니다.",
+    "AI Clips (Kaggle)": "AI 클립 (Kaggle)",
+    "AI Clips Folder": "AI 클립 폴더",
+    "AI Clips Folder Help": "무료 Kaggle 노트북으로 만든 클립입니다(kaggle/README-ar.md 참고). 다음 폴더의 하위 폴더에 압축을 푸세요: {folder}",
+    "AI Clips Count": "AI 클립 {count}개가 내레이션 순서대로 영상에 섞입니다.",
+    "Create Prompts for Kaggle": "Kaggle용 프롬프트 만들기",
+    "Create Prompts Needs Script": "먼저 영상 대본을 작성하거나 생성하세요.",
+    "Creating Prompts": "문단마다 AI 장면 프롬프트를 작성하는 중...",
+    "Kaggle Prompts Help": "이 줄들을 Kaggle 노트북의 PROMPTS 셀에 붙여넣으세요(한 줄에 클립 하나).",
+    "Download prompts.txt": "prompts.txt 다운로드"
   }
 }

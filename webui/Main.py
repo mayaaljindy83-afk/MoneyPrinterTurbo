@@ -45,6 +45,7 @@ from app.models.schema import (
 )
 from app.services import bgm as bgm_service
 from app.services import (
+    ai_clips,
     branding,
     cache_manager,
     llm,
@@ -4898,6 +4899,63 @@ def _render_loomloom_script_generation(params):
     _render_loomloom_candidates()
 
 
+def _render_ai_clips_settings(params):
+    """AI clips generated on Kaggle: pick a folder and export scene prompts."""
+    with st.expander(tr("AI Clips (Kaggle)"), expanded=False):
+        root = ai_clips.ai_clips_root(create=True)
+        folders = sorted(
+            entry for entry in os.listdir(root) if os.path.isdir(os.path.join(root, entry))
+        )
+        options = [""] + folders
+        labels = {value: value or tr("None") for value in options}
+        params.ai_clips_folder = stable_selectbox(
+            tr("AI Clips Folder"),
+            options=options,
+            default_value="",
+            key="ai_clips_folder_select",
+            format_func=lambda value: labels[value],
+            help=tr("AI Clips Folder Help").format(folder=root),
+        )
+        if params.ai_clips_folder:
+            folder = os.path.join(root, params.ai_clips_folder)
+            st.caption(tr("AI Clips Count").format(count=len(ai_clips.list_ai_clips(folder))))
+
+        if st.button(
+            tr("Create Prompts for Kaggle"),
+            key="create_kaggle_prompts",
+            icon=":material/movie:",
+            use_container_width=True,
+        ):
+            script = str(st.session_state.get("video_script", "") or "").strip()
+            subject = str(st.session_state.get("video_subject", "") or "").strip()
+            if not script:
+                st.warning(tr("Create Prompts Needs Script"))
+            else:
+                with st.spinner(tr("Creating Prompts")):
+                    try:
+                        st.session_state["kaggle_prompts_text"] = ai_clips.prompts_to_text(
+                            _run_llm_read_operation(
+                                "build_scene_prompts",
+                                lambda app_config_snapshot: ai_clips.build_scene_prompts(
+                                    subject, script, app_config=app_config_snapshot
+                                ),
+                            )
+                        )
+                    except RuntimeError as exc:
+                        st.error(str(exc))
+        prompts_text = st.session_state.get("kaggle_prompts_text", "")
+        if prompts_text:
+            st.caption(tr("Kaggle Prompts Help"))
+            st.code(prompts_text, language=None)
+            st.download_button(
+                tr("Download prompts.txt"),
+                data=prompts_text.encode("utf-8"),
+                file_name="prompts.txt",
+                mime="text/plain",
+                key="download_kaggle_prompts",
+            )
+
+
 def _render_script_settings(panel, params):
     """渲染文案设置并更新生成参数。"""
     with panel:
@@ -5263,6 +5321,8 @@ def _render_video_settings(panel, params):
                 help=tr("Add Intro/Outro Help").format(folder=branding.branding_dir()),
             )
             _set_runtime_config("ui", "add_intro_outro", params.add_intro_outro)
+
+            _render_ai_clips_settings(params)
 
             video_aspect_ratios = [
                 (tr("Portrait"), VideoAspect.portrait.value),

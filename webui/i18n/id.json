@@ -433,6 +433,15 @@
     "Subtitle Style shorts_bold": "Shorts tebal (besar, di tengah)",
     "Subtitle Style minimal": "Minimalis",
     "Video Quality": "Kualitas video",
-    "Video Quality Help": "1080p memberi kualitas terbaik. 720p dirender sekitar dua kali lebih cepat di CPU laptop dan mengunduh klip stok yang lebih kecil."
+    "Video Quality Help": "1080p memberi kualitas terbaik. 720p dirender sekitar dua kali lebih cepat di CPU laptop dan mengunduh klip stok yang lebih kecil.",
+    "AI Clips (Kaggle)": "Klip AI (Kaggle)",
+    "AI Clips Folder": "Folder klip AI",
+    "AI Clips Folder Help": "Klip yang dibuat dengan notebook Kaggle gratis (lihat kaggle/README-ar.md). Ekstrak ke subfolder dari: {folder}",
+    "AI Clips Count": "{count} klip AI akan dicampur ke video sesuai urutan narasi.",
+    "Create Prompts for Kaggle": "Buat prompt untuk Kaggle",
+    "Create Prompts Needs Script": "Tulis atau buat naskah video terlebih dahulu.",
+    "Creating Prompts": "Menulis satu prompt adegan AI per paragraf...",
+    "Kaggle Prompts Help": "Tempel baris-baris ini ke sel PROMPTS di notebook Kaggle (satu klip per baris).",
+    "Download prompts.txt": "Unduh prompts.txt"
   }
 }

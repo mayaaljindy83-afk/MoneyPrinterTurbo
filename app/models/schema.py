@@ -170,6 +170,9 @@ class VideoParams(BaseModel):
     subtitle_style: str = ""
     # Prepend/append intro.* and outro.* from the branding folder.
     add_intro_outro: bool = False
+    # Folder name inside <storage>/ai_clips with clips made by the Kaggle
+    # notebook; they are spread over the timeline in narration order.
+    ai_clips_folder: str = ""
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
 

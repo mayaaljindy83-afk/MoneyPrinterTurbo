@@ -17,6 +17,7 @@ from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams
 from app.services import bgm as bgm_service
 from app.services import (
+    ai_clips,
     branding,
     elevenlabs_music,
     llm,
@@ -925,6 +926,18 @@ def _get_material_source_groups(task_id: str, video_paths: list[str]) -> dict[st
         return {}
 
 
+def _mix_in_ai_clips(params, downloaded_videos: list[str]) -> list[str]:
+    """Add the user's Kaggle-generated clips; a bad folder never fails the task."""
+    try:
+        folder = ai_clips.resolve_ai_clips_folder(params.ai_clips_folder)
+    except ValueError as exc:
+        logger.warning(f"AI clips skipped: {exc}")
+        return downloaded_videos
+    clips = ai_clips.list_ai_clips(folder)
+    logger.info(f"mixing {len(clips)} AI clips from {folder} into {len(downloaded_videos)} stock clips")
+    return ai_clips.mix_ai_clips(downloaded_videos, clips)
+
+
 def order_videos_by_terms(task_id: str, video_paths: list[str], video_terms) -> list[str]:
     """Group downloaded clips by search term, in script order.
 
@@ -1662,6 +1675,8 @@ def _run_pipeline(
     )
     if downloaded_videos and is_long_video(params) and params.match_materials_to_script:
         downloaded_videos = order_videos_by_terms(task_id, downloaded_videos, video_terms)
+    if downloaded_videos and params.ai_clips_folder:
+        downloaded_videos = _mix_in_ai_clips(params, downloaded_videos)
     if not downloaded_videos:
         return _mark_task_failed(
             task_id,

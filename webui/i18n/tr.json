@@ -433,6 +433,15 @@
     "Subtitle Style shorts_bold": "Shorts kalın (büyük, ortada)",
     "Subtitle Style minimal": "Sade",
     "Video Quality": "Video kalitesi",
-    "Video Quality Help": "1080p en iyi kaliteyi verir. 720p dizüstü bilgisayar işlemcisinde yaklaşık iki kat hızlı işlenir ve daha küçük stok klipler indirir."
+    "Video Quality Help": "1080p en iyi kaliteyi verir. 720p dizüstü bilgisayar işlemcisinde yaklaşık iki kat hızlı işlenir ve daha küçük stok klipler indirir.",
+    "AI Clips (Kaggle)": "Yapay zekâ klipleri (Kaggle)",
+    "AI Clips Folder": "Yapay zekâ klip klasörü",
+    "AI Clips Folder Help": "Ücretsiz Kaggle not defteriyle üretilen klipler (bkz. kaggle/README-ar.md). Şu klasörün bir alt klasörüne açın: {folder}",
+    "AI Clips Count": "{count} yapay zekâ klibi anlatım sırasına göre videoya karıştırılacak.",
+    "Create Prompts for Kaggle": "Kaggle için istemler oluştur",
+    "Create Prompts Needs Script": "Önce video senaryosunu yazın veya oluşturun.",
+    "Creating Prompts": "Her paragraf için bir yapay zekâ sahne istemi yazılıyor...",
+    "Kaggle Prompts Help": "Bu satırları Kaggle not defterindeki PROMPTS hücresine yapıştırın (her satır bir klip).",
+    "Download prompts.txt": "prompts.txt indir"
   }
 }

@@ -433,6 +433,15 @@
     "Subtitle Style shorts_bold": "Shorts gras (grand, centré)",
     "Subtitle Style minimal": "Minimal",
     "Video Quality": "Qualité vidéo",
-    "Video Quality Help": "1080p offre la meilleure qualité. 720p se rend environ deux fois plus vite sur le processeur d'un portable et télécharge des clips plus légers."
+    "Video Quality Help": "1080p offre la meilleure qualité. 720p se rend environ deux fois plus vite sur le processeur d'un portable et télécharge des clips plus légers.",
+    "AI Clips (Kaggle)": "Clips IA (Kaggle)",
+    "AI Clips Folder": "Dossier des clips IA",
+    "AI Clips Folder Help": "Clips créés avec le notebook Kaggle gratuit (voir kaggle/README-ar.md). Décompressez-les dans un sous-dossier de : {folder}",
+    "AI Clips Count": "{count} clips IA seront intégrés à la vidéo, dans l'ordre de la narration.",
+    "Create Prompts for Kaggle": "Créer les prompts pour Kaggle",
+    "Create Prompts Needs Script": "Écrivez ou générez d'abord le script de la vidéo.",
+    "Creating Prompts": "Rédaction d'un prompt de scène IA par paragraphe...",
+    "Kaggle Prompts Help": "Collez ces lignes dans la cellule PROMPTS du notebook Kaggle (un clip par ligne).",
+    "Download prompts.txt": "Télécharger prompts.txt"
   }
 }

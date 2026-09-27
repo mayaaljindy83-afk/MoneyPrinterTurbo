@@ -433,6 +433,15 @@
     "Subtitle Style shorts_bold": "Shorts qalın (böyük, mərkəzdə)",
     "Subtitle Style minimal": "Minimal",
     "Video Quality": "Video keyfiyyəti",
-    "Video Quality Help": "1080p ən yaxşı keyfiyyəti verir. 720p noutbuk CPU-da təxminən iki dəfə sürətli render olunur və daha kiçik stok kliplər yükləyir."
+    "Video Quality Help": "1080p ən yaxşı keyfiyyəti verir. 720p noutbuk CPU-da təxminən iki dəfə sürətli render olunur və daha kiçik stok kliplər yükləyir.",
+    "AI Clips (Kaggle)": "AI klipləri (Kaggle)",
+    "AI Clips Folder": "AI klipləri qovluğu",
+    "AI Clips Folder Help": "Pulsuz Kaggle notbukunda hazırlanan kliplər (kaggle/README-ar.md-ə baxın). Onları bu qovluğun alt qovluğuna açın: {folder}",
+    "AI Clips Count": "{count} AI klipi nəql ardıcıllığı ilə videoya qarışdırılacaq.",
+    "Create Prompts for Kaggle": "Kaggle üçün promptlar yarat",
+    "Create Prompts Needs Script": "Əvvəlcə video ssenarisini yazın və ya yaradın.",
+    "Creating Prompts": "Hər paraqraf üçün bir AI səhnə promptu yazılır...",
+    "Kaggle Prompts Help": "Bu sətirləri Kaggle notbukunun PROMPTS xanasına yapışdırın (hər sətir bir klip).",
+    "Download prompts.txt": "prompts.txt yüklə"
   }
 }

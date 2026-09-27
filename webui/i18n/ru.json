@@ -433,6 +433,15 @@
     "Subtitle Style shorts_bold": "Shorts жирный (крупный, по центру)",
     "Subtitle Style minimal": "Минимализм",
     "Video Quality": "Качество видео",
-    "Video Quality Help": "1080p даёт лучшее качество. 720p рендерится примерно вдвое быстрее на процессоре ноутбука и скачивает более лёгкие ролики."
+    "Video Quality Help": "1080p даёт лучшее качество. 720p рендерится примерно вдвое быстрее на процессоре ноутбука и скачивает более лёгкие ролики.",
+    "AI Clips (Kaggle)": "ИИ-клипы (Kaggle)",
+    "AI Clips Folder": "Папка ИИ-клипов",
+    "AI Clips Folder Help": "Клипы из бесплатного блокнота Kaggle (см. kaggle/README-ar.md). Распакуйте их в подпапку: {folder}",
+    "AI Clips Count": "В видео будет добавлено ИИ-клипов: {count}, в порядке озвучки.",
+    "Create Prompts for Kaggle": "Создать промпты для Kaggle",
+    "Create Prompts Needs Script": "Сначала напишите или сгенерируйте сценарий видео.",
+    "Creating Prompts": "Пишем по одному промпту сцены для каждого абзаца...",
+    "Kaggle Prompts Help": "Вставьте эти строки в ячейку PROMPTS блокнота Kaggle (одна строка — один клип).",
+    "Download prompts.txt": "Скачать prompts.txt"
   }
 }
