@@ -418,6 +418,21 @@
     "OFox Upstream Vendor Help": "OFox video üretimini hangi üst akış sağlayıcısının sunacağı. BytePlus (uluslararası) tutarlı içerik politikasıyla varsayılandır; Volcano Engine Çin anakarası sağlayıcısıdır; Otomatik, OFox ağ geçidinin yükü sağlayıcılar arasında dengelemesine izin verir.",
     "OFox Vendor BytePlus": "BytePlus (uluslararası, varsayılan)",
     "OFox Vendor Volcengine": "Volcano Engine (Çin anakarası)",
-    "OFox Vendor Auto": "Otomatik (ağ geçidi yük dengeleme)"
+    "OFox Vendor Auto": "Otomatik (ağ geçidi yük dengeleme)",
+    "Video Length (minutes)": "Video süresi (dakika)",
+    "Video Length Help": "0 = kısa video (paragraf sayısını kullanır). 1-10 = uzun video: senaryo bölüm bölüm yazılarak yaklaşık bu süreye ulaşılır ve görüntüler anlatımı takip eder.",
+    "Crossfade": "Çapraz geçiş (yumuşak)",
+    "Add Intro/Outro": "Giriş/kapanış ekle",
+    "Add Intro/Outro Help": "intro.mp4 / outro.mp4 (veya .png/.jpg) adlı dosyaları şuraya koyun: {folder}",
+    "Subtitle Style": "Altyazı stili",
+    "Subtitle Style Help": "Hazır bir görünüm. Aşağıdaki yazı tipi, renk, kontur ve konumun yerine geçer; kendi ayarlarınız için Özel'i seçin.",
+    "Subtitle Style custom": "Özel (aşağıdaki ayarlar)",
+    "Subtitle Style classic": "Klasik (beyaz, siyah kontur)",
+    "Subtitle Style boxed": "Kutulu (koyu yuvarlak kutu)",
+    "Subtitle Style youtube_yellow": "YouTube sarısı",
+    "Subtitle Style shorts_bold": "Shorts kalın (büyük, ortada)",
+    "Subtitle Style minimal": "Sade",
+    "Video Quality": "Video kalitesi",
+    "Video Quality Help": "1080p en iyi kaliteyi verir. 720p dizüstü bilgisayar işlemcisinde yaklaşık iki kat hızlı işlenir ve daha küçük stok klipler indirir."
   }
 }

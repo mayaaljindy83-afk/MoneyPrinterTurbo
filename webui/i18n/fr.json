@@ -418,6 +418,21 @@
     "OFox Upstream Vendor Help": "Fournisseur amont utilisé pour la génération vidéo OFox. BytePlus (international) est la valeur par défaut, avec une politique de contenu cohérente ; Volcano Engine est le fournisseur de Chine continentale ; Auto laisse la passerelle OFox répartir la charge entre les fournisseurs.",
     "OFox Vendor BytePlus": "BytePlus (international, défaut)",
     "OFox Vendor Volcengine": "Volcano Engine (Chine continentale)",
-    "OFox Vendor Auto": "Auto (répartition par la passerelle)"
+    "OFox Vendor Auto": "Auto (répartition par la passerelle)",
+    "Video Length (minutes)": "Durée de la vidéo (minutes)",
+    "Video Length Help": "0 = vidéo courte (utilise le nombre de paragraphes). 1-10 = vidéo longue : le script est écrit section par section pour atteindre environ cette durée, et les images suivent la narration.",
+    "Crossfade": "Fondu enchaîné (doux)",
+    "Add Intro/Outro": "Ajouter intro/outro",
+    "Add Intro/Outro Help": "Placez des fichiers nommés intro.mp4 / outro.mp4 (ou .png/.jpg) dans : {folder}",
+    "Subtitle Style": "Style des sous-titres",
+    "Subtitle Style Help": "Un rendu prêt à l'emploi. Il remplace la police, les couleurs, le contour et la position ci-dessous ; choisissez Personnalisé pour vos propres réglages.",
+    "Subtitle Style custom": "Personnalisé (réglages ci-dessous)",
+    "Subtitle Style classic": "Classique (blanc, contour noir)",
+    "Subtitle Style boxed": "Encadré (boîte sombre arrondie)",
+    "Subtitle Style youtube_yellow": "Jaune YouTube",
+    "Subtitle Style shorts_bold": "Shorts gras (grand, centré)",
+    "Subtitle Style minimal": "Minimal",
+    "Video Quality": "Qualité vidéo",
+    "Video Quality Help": "1080p offre la meilleure qualité. 720p se rend environ deux fois plus vite sur le processeur d'un portable et télécharge des clips plus légers."
   }
 }

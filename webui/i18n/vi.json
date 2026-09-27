@@ -418,6 +418,21 @@
     "OFox Upstream Vendor Help": "Nhà cung cấp thượng nguồn phục vụ việc tạo video OFox. BytePlus (quốc tế) là mặc định với chính sách nội dung nhất quán; Volcano Engine là nhà cung cấp Trung Quốc đại lục; Tự động để gateway OFox cân bằng tải giữa các nhà cung cấp.",
     "OFox Vendor BytePlus": "BytePlus (quốc tế, mặc định)",
     "OFox Vendor Volcengine": "Volcano Engine (Trung Quốc đại lục)",
-    "OFox Vendor Auto": "Tự động (gateway cân bằng tải)"
+    "OFox Vendor Auto": "Tự động (gateway cân bằng tải)",
+    "Video Length (minutes)": "Độ dài video (phút)",
+    "Video Length Help": "0 = video ngắn (dùng số đoạn văn). 1-10 = video dài: kịch bản được viết theo từng phần để đạt khoảng số phút này, và cảnh quay đi theo lời dẫn.",
+    "Crossfade": "Chuyển cảnh mờ dần (mượt)",
+    "Add Intro/Outro": "Thêm intro/outro",
+    "Add Intro/Outro Help": "Đặt các tệp tên intro.mp4 / outro.mp4 (hoặc .png/.jpg) vào: {folder}",
+    "Subtitle Style": "Kiểu phụ đề",
+    "Subtitle Style Help": "Giao diện dựng sẵn. Thay thế phông chữ, màu sắc, viền và vị trí bên dưới; chọn Tùy chỉnh để dùng cài đặt của bạn.",
+    "Subtitle Style custom": "Tùy chỉnh (cài đặt bên dưới)",
+    "Subtitle Style classic": "Cổ điển (chữ trắng, viền đen)",
+    "Subtitle Style boxed": "Có nền (hộp tối bo góc)",
+    "Subtitle Style youtube_yellow": "Vàng YouTube",
+    "Subtitle Style shorts_bold": "Shorts đậm (to, ở giữa)",
+    "Subtitle Style minimal": "Tối giản",
+    "Video Quality": "Chất lượng video",
+    "Video Quality Help": "1080p cho chất lượng tốt nhất. 720p kết xuất nhanh hơn khoảng gấp đôi trên CPU laptop và tải các clip nhỏ hơn."
   }
 }

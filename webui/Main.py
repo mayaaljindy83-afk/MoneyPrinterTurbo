@@ -45,14 +45,17 @@ from app.models.schema import (
 )
 from app.services import bgm as bgm_service
 from app.services import (
+    branding,
     cache_manager,
     llm,
+    long_script,
     loomloom,
     material,
     metaso_minimax,
     muapi,
     ofox,
     subtitle,
+    subtitle_styles,
     video,
     volcengine_seedance,
     voice,
@@ -4545,6 +4548,19 @@ def _render_local_script_generation(params):
     with st.spinner(tr("Generating Video Script and Keywords")):
 
         def generate_script_and_terms(app_config_snapshot):
+            if long_script.clamp_minutes(params.video_duration_minutes) > 0:
+                try:
+                    result = long_script.generate_long_script(
+                        subject=params.video_subject,
+                        language=params.video_language,
+                        minutes=params.video_duration_minutes,
+                        voice_rate=params.voice_rate,
+                        extra_prompt=params.video_script_prompt,
+                        app_config=app_config_snapshot,
+                    )
+                except RuntimeError as exc:
+                    return f"Error: {exc}", []
+                return result.script, result.terms
             script = llm.generate_script(
                 video_subject=params.video_subject,
                 language=params.video_language,
@@ -4938,6 +4954,22 @@ def _render_script_settings(panel, params):
             params.video_language = selected_language_code
             _set_runtime_config("ui", "video_language", params.video_language)
 
+            st.session_state.setdefault(
+                "video_duration_minutes_input",
+                float(config.ui.get("video_duration_minutes", 0.0) or 0.0),
+            )
+            params.video_duration_minutes = st.number_input(
+                tr("Video Length (minutes)"),
+                min_value=0.0,
+                max_value=10.0,
+                step=0.5,
+                key="video_duration_minutes_input",
+                help=tr("Video Length Help"),
+            )
+            _set_runtime_config(
+                "ui", "video_duration_minutes", params.video_duration_minutes
+            )
+
             # 使用带 key 的局部容器限定折叠入口样式，保持 expander 的原生交互，
             # 同时避免样式误伤页面顶部的“基础设置”等其他折叠区域。
             with st.container(key="advanced_settings_script"):
@@ -5198,6 +5230,7 @@ def _render_video_settings(panel, params):
                 (tr("SlideOut"), VideoTransitionMode.slide_out.value),
                 (tr("ZoomIn"), VideoTransitionMode.zoom_in.value),
                 (tr("ZoomOut"), VideoTransitionMode.zoom_out.value),
+                (tr("Crossfade"), VideoTransitionMode.crossfade.value),
             ]
             selected_transition_mode = stable_selectbox(
                 tr("Video Transition Mode"),
@@ -5218,6 +5251,17 @@ def _render_video_settings(panel, params):
                 "video_transition_mode",
                 params.video_transition_mode.value,
             )
+
+            st.session_state.setdefault(
+                "add_intro_outro_checkbox",
+                bool(config.ui.get("add_intro_outro", False)),
+            )
+            params.add_intro_outro = st.checkbox(
+                tr("Add Intro/Outro"),
+                key="add_intro_outro_checkbox",
+                help=tr("Add Intro/Outro Help").format(folder=branding.branding_dir()),
+            )
+            _set_runtime_config("ui", "add_intro_outro", params.add_intro_outro)
 
             video_aspect_ratios = [
                 (tr("Portrait"), VideoAspect.portrait.value),
@@ -5255,6 +5299,18 @@ def _render_video_settings(panel, params):
             _set_runtime_config(
                 "ui", video_aspect_config_key, params.video_aspect.value
             )
+
+            video_resolutions = ["1080p", "720p"]
+            selected_resolution = stable_selectbox(
+                tr("Video Quality"),
+                options=video_resolutions,
+                default_value=(
+                    "720p" if config.app.get("video_resolution") == "720p" else "1080p"
+                ),
+                key="video_resolution_select",
+                help=tr("Video Quality Help"),
+            )
+            _set_runtime_config("app", "video_resolution", selected_resolution)
 
             video_fit_modes = [
                 (tr("Fill and Crop"), VideoFitMode.cover.value),
@@ -7490,6 +7546,23 @@ def _render_subtitle_settings(panel, params):
             )
             _set_runtime_config("ui", "subtitle_enabled", params.subtitle_enabled)
             subtitle_settings_disabled = not params.subtitle_enabled
+            subtitle_style_options = [""] + subtitle_styles.style_names()
+            subtitle_style_labels = {
+                value: tr(f"Subtitle Style {value or 'custom'}")
+                for value in subtitle_style_options
+            }
+            params.subtitle_style = stable_selectbox(
+                tr("Subtitle Style"),
+                options=subtitle_style_options,
+                default_value=_saved_ui_choice(
+                    "subtitle_style", subtitle_style_options, ""
+                ),
+                key="subtitle_style_select",
+                format_func=lambda value: subtitle_style_labels[value],
+                help=tr("Subtitle Style Help"),
+                disabled=subtitle_settings_disabled,
+            )
+            _set_runtime_config("ui", "subtitle_style", params.subtitle_style)
             font_names = get_all_fonts()
             saved_font_name = config.ui.get(
                 "font_name", DEFAULT_SUBTITLE_SETTINGS["font_name"]

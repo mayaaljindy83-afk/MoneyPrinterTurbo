@@ -418,6 +418,21 @@
     "OFox Upstream Vendor Help": "Welcher Upstream-Anbieter die OFox-Videogenerierung bedient. BytePlus (international) ist der Standard mit einheitlicher Inhaltsrichtlinie; Volcano Engine ist der Festland-China-Anbieter; Auto lässt das OFox-Gateway die Last über die Anbieter verteilen.",
     "OFox Vendor BytePlus": "BytePlus (international, Standard)",
     "OFox Vendor Volcengine": "Volcano Engine (Festlandchina)",
-    "OFox Vendor Auto": "Auto (Gateway-Lastverteilung)"
+    "OFox Vendor Auto": "Auto (Gateway-Lastverteilung)",
+    "Video Length (minutes)": "Videolänge (Minuten)",
+    "Video Length Help": "0 = kurzes Video (nutzt die Absatzanzahl). 1-10 = langes Video: Das Skript wird abschnittsweise geschrieben, bis ungefähr diese Minutenzahl erreicht ist, und das Bildmaterial folgt der Erzählung.",
+    "Crossfade": "Überblendung (weich)",
+    "Add Intro/Outro": "Intro/Outro hinzufügen",
+    "Add Intro/Outro Help": "Dateien namens intro.mp4 / outro.mp4 (oder .png/.jpg) ablegen in: {folder}",
+    "Subtitle Style": "Untertitelstil",
+    "Subtitle Style Help": "Ein fertiger Look. Er ersetzt Schrift, Farben, Kontur und Position unten; wähle Benutzerdefiniert für eigene Einstellungen.",
+    "Subtitle Style custom": "Benutzerdefiniert (Einstellungen unten)",
+    "Subtitle Style classic": "Klassisch (weiß, schwarze Kontur)",
+    "Subtitle Style boxed": "Box (dunkle abgerundete Box)",
+    "Subtitle Style youtube_yellow": "YouTube-Gelb",
+    "Subtitle Style shorts_bold": "Shorts fett (groß, zentriert)",
+    "Subtitle Style minimal": "Minimal",
+    "Video Quality": "Videoqualität",
+    "Video Quality Help": "1080p bietet die beste Qualität. 720p rendert auf einer Laptop-CPU etwa doppelt so schnell und lädt kleinere Stock-Clips herunter."
   }
 }

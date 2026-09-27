@@ -418,6 +418,21 @@
     "OFox Upstream Vendor Help": "Vendor upstream yang melayani pembuatan video OFox. BytePlus (internasional) adalah bawaan dengan kebijakan konten yang konsisten; Volcano Engine adalah vendor Tiongkok daratan; Auto membiarkan gateway OFox menyeimbangkan beban antar vendor.",
     "OFox Vendor BytePlus": "BytePlus (internasional, bawaan)",
     "OFox Vendor Volcengine": "Volcano Engine (Tiongkok daratan)",
-    "OFox Vendor Auto": "Otomatis (penyeimbangan gateway)"
+    "OFox Vendor Auto": "Otomatis (penyeimbangan gateway)",
+    "Video Length (minutes)": "Durasi video (menit)",
+    "Video Length Help": "0 = video pendek (memakai jumlah paragraf). 1-10 = video panjang: naskah ditulis per bagian hingga mencapai sekitar durasi ini, dan cuplikan mengikuti narasi.",
+    "Crossfade": "Crossfade (halus)",
+    "Add Intro/Outro": "Tambahkan intro/outro",
+    "Add Intro/Outro Help": "Letakkan file bernama intro.mp4 / outro.mp4 (atau .png/.jpg) di: {folder}",
+    "Subtitle Style": "Gaya subtitle",
+    "Subtitle Style Help": "Tampilan siap pakai. Menggantikan font, warna, garis tepi, dan posisi di bawah; pilih Kustom untuk memakai pengaturan sendiri.",
+    "Subtitle Style custom": "Kustom (pengaturan di bawah)",
+    "Subtitle Style classic": "Klasik (putih, garis hitam)",
+    "Subtitle Style boxed": "Kotak (kotak gelap membulat)",
+    "Subtitle Style youtube_yellow": "Kuning YouTube",
+    "Subtitle Style shorts_bold": "Shorts tebal (besar, di tengah)",
+    "Subtitle Style minimal": "Minimalis",
+    "Video Quality": "Kualitas video",
+    "Video Quality Help": "1080p memberi kualitas terbaik. 720p dirender sekitar dua kali lebih cepat di CPU laptop dan mengunduh klip stok yang lebih kecil."
   }
 }
