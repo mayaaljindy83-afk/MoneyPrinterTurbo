@@ -216,7 +216,8 @@ class PresenterSource:
         return img.resize((max(1, int(img.width * scale)), self.height), Image.LANCZOS)
 
     def _load_video(self, video: str, fps: int) -> None:
-        probe = subprocess.run([utils.get_ffmpeg_binary(), "-i", video], capture_output=True, text=True).stderr
+        probe = subprocess.run([utils.get_ffmpeg_binary(), "-i", video], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace").stderr
         import re
 
         size = re.search(r", (\d{2,5})x(\d{2,5})", probe)

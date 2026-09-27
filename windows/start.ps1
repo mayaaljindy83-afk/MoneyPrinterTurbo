@@ -40,6 +40,8 @@ if ($DataDir) {
 }
 $models = [Environment]::GetEnvironmentVariable("OLLAMA_MODELS", "User")
 if ($models) { $env:OLLAMA_MODELS = $models }
+# Python reads and writes text as UTF-8 (Arabic), not the Windows code page (cp1252 "charmap").
+$env:PYTHONUTF8 = "1"
 
 # 1) Ollama
 Write-Host "Starting the AI writer (Ollama)..."

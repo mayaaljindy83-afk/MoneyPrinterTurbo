@@ -33,7 +33,8 @@ FADE = 0.4
 
 def _ffmpeg(args: list[str]) -> None:
     command = [utils.get_ffmpeg_binary(), "-y", "-loglevel", "error", *args]
-    result = subprocess.run(command, capture_output=True, text=True)
+    # FFmpeg writes UTF-8; never decode it with the Windows code page.
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {result.stderr.strip()[-1500:]}")
 

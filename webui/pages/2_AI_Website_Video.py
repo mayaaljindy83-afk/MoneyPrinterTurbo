@@ -184,7 +184,7 @@ if projects:
     def job_panel(mode: str, label: str, locked: bool = False):
         job_id = project["jobs"].get(mode)
         busy = bool(job_id) and studio.is_busy(job_id)
-        interrupted = bool(job_id) and studio.was_interrupted(job_id)
+        interrupted = bool(job_id) and studio.can_continue(job_id)
         if interrupted:
             st.warning(t("interrupted"))
         if st.button(t("continue") if interrupted else label, type="primary", key=f"{mode}_{project_id}",

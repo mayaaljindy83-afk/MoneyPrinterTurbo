@@ -16,6 +16,7 @@ week for free and a run that goes over simply stops.
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import re
@@ -37,6 +38,24 @@ RUNNING = {"queued", "running", "new_script", "newscript", "cancelrequested", "c
 
 class KaggleError(RuntimeError):
     pass
+
+
+def _utf8_open(file, mode="r", *args, **kwargs):
+    """``open`` that defaults to UTF-8 for text files.
+
+    The kaggle package writes the run log with ``open(path, "w")`` and no
+    encoding. On Windows that means the ANSI code page (cp1252, "charmap"),
+    which cannot store Arabic, so downloading a finished run crashed right
+    after status COMPLETE. Binary files and explicit encodings are untouched.
+    """
+    if "b" not in mode and "encoding" not in kwargs and len(args) < 2:
+        kwargs["encoding"] = "utf-8"
+    return builtins.open(file, mode, *args, **kwargs)
+
+
+def use_utf8_file_io(module) -> None:
+    """Make a third-party module's bare ``open()`` calls UTF-8 (idempotent)."""
+    module.open = _utf8_open
 
 
 def configured_token() -> str:
@@ -71,9 +90,11 @@ class KaggleAgent:
                 raise KaggleError("Kaggle API token is missing. Add it in the Presenter video settings.")
             os.environ["KAGGLE_API_TOKEN"] = self.token
             try:
+                from kaggle.api import kaggle_api_extended
                 from kaggle.api.kaggle_api_extended import KaggleApi
             except ImportError as exc:  # pragma: no cover - dependency is in requirements
                 raise KaggleError("The 'kaggle' package is not installed. Run install.bat again.") from exc
+            use_utf8_file_io(kaggle_api_extended)
             api = KaggleApi()
             try:
                 api.authenticate()
@@ -117,7 +138,8 @@ class KaggleAgent:
                     zf.write(path, os.path.relpath(path, package))
         ref = self.dataset_ref(job_id)
         with open(os.path.join(upload, "dataset-metadata.json"), "w", encoding="utf-8") as fp:
-            json.dump({"title": ref.split("/", 1)[1], "id": ref, "licenses": [{"name": "CC0-1.0"}]}, fp)
+            json.dump({"title": ref.split("/", 1)[1], "id": ref, "licenses": [{"name": "CC0-1.0"}]}, fp,
+                      ensure_ascii=False)
         state = os.path.join(root, "kaggle.json")
         uploaded = os.path.isfile(state) and self._state(job_id).get("dataset") == ref
         if uploaded:
@@ -145,7 +167,7 @@ class KaggleAgent:
             "dataset_sources": [dataset], "kernel_sources": [], "competition_sources": [],
         }
         with open(os.path.join(folder, "kernel-metadata.json"), "w", encoding="utf-8") as fp:
-            json.dump(metadata, fp, indent=2)
+            json.dump(metadata, fp, ensure_ascii=False, indent=2)
         self.log(f"starting the worker on Kaggle GPU: https://www.kaggle.com/code/{ref}")
         self._check(self.api.kernels_push(folder))
         self._save_state(job_id, kernel=ref)
@@ -212,7 +234,12 @@ class KaggleAgent:
             summary, finished = self._collect(job_id, kernel, on_status)
             if finished:
                 return summary
+            if attempt < max_runs:
+                self.log("starting another run for the missing shots")
         return summary
+
+    def has_run(self, job_id: str) -> bool:
+        return bool(self._state(job_id).get("kernel"))
 
     def resume(self, job_id: str, max_runs: int = 4, on_status=None) -> dict:
         """Pick a job up again after the laptop was off or the program closed.
@@ -242,7 +269,7 @@ class KaggleAgent:
             raise KaggleError(
                 f"The Kaggle run failed before making any shot. Open https://www.kaggle.com/code/{kernel} "
                 "and look at the log (Output / Logs).")
-        self.log(f"{summary.get('done', 0)}/{summary.get('total', '?')} shots ready; starting another run")
+        self.log(f"{summary.get('done', 0)}/{summary.get('total', '?')} shots ready")
         return summary, False
 
     # -- helpers --------------------------------------------------------------------
@@ -280,4 +307,4 @@ class KaggleAgent:
         state = self._state(job_id)
         state.update(fields)
         with open(os.path.join(job_package.job_dir(job_id), "kaggle.json"), "w", encoding="utf-8") as fp:
-            json.dump(state, fp, indent=2)
+            json.dump(state, fp, ensure_ascii=False, indent=2)

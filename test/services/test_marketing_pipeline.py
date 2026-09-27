@@ -74,7 +74,7 @@ class FakeKaggle:
         total = sum(1 for s in job["shots"] if not s.get("local"))
         return {"total": total, "done": total, "complete": True, "rendered_now": done}
 
-    def run_job(self, job_id, on_status=None, max_runs=4):
+    def run_job(self, job_id, on_status=None, max_runs=4, continuing=False):
         return self._render(job_id)
 
     def resume(self, job_id, max_runs=4, on_status=None):

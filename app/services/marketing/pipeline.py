@@ -186,8 +186,8 @@ def start(project_id: str, mode: str, token: str, options: dict | None = None, a
     """Create (or reuse the unfinished) job and render it on Kaggle in the background."""
     project = load_project(project_id)
     job_id = project["jobs"].get(mode)
-    if job_id and studio.read_status(job_id).get("state") not in ("done", "error", "new"):
-        studio.start_resume(job_id, token, options, agent=agent)  # never redo finished scenes
+    if job_id and (studio.can_continue(job_id) or studio.read_status(job_id).get("state") in studio.ACTIVE_STATES):
+        studio.start_resume(job_id, token, options, agent=agent)  # fetch; never redo finished scenes
         return job_id
     job_id = create_job(project_id, mode)
     studio.start_kaggle_render(job_id, token, options, agent=agent)

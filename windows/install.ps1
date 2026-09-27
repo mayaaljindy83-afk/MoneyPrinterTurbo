@@ -115,6 +115,7 @@ foreach ($sub in @("temp", "pip-cache", "ollama-models", "music", "branding", "p
 # Keep every temporary and cache file off the small C: drive.
 $env:TEMP = Join-Path $DataDir "temp"
 $env:TMP = $env:TEMP
+$env:PYTHONUTF8 = "1"  # Python reads/writes text as UTF-8 (Arabic), not the Windows code page
 $env:PIP_CACHE_DIR = Join-Path $DataDir "pip-cache"
 # The browser that reads websites (AI Website Video) lives on the data drive too.
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $DataDir "playwright-browsers"
