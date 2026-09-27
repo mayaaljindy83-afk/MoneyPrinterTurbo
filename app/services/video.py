@@ -866,15 +866,22 @@ def _crossfade_from_previous(
         clip_speed,
         tail_file,
     ):
-        source = _open_video_clip_quietly(tail_file)
-        if source.duration >= duration * 0.9:
+        try:
+            source = _open_video_clip_quietly(tail_file)
+        except Exception as exc:
+            # FFmpeg writes an empty file when the previous shot already ended
+            # at the end of its source; hold its last frame instead (below).
+            logger.debug(f"crossfade tail is empty, using a still frame: {exc}")
+            source = None
+        if source is not None and source.duration and source.duration >= duration * 0.9:
             tail = source.with_duration(min(duration, source.duration))
             tail = tail.with_effects([vfx.CrossFadeOut(tail.duration)]).with_start(0)
             blended = CompositeVideoClip(
                 [clip, tail], size=(target_width, target_height), use_bgclip=True
             ).with_duration(clip.duration)
             return blended, source
-        close_clip(source)
+        if source is not None:
+            close_clip(source)
 
     source = _open_video_clip_quietly(previous.file_path)
     tail_start = min(previous.end_time or source.duration, source.duration)
@@ -1083,15 +1090,19 @@ def combine_videos(
                 transition_value == VideoTransitionMode.crossfade.value
                 and previous_item is not None
             ):
-                clip, crossfade_source = _crossfade_from_previous(
-                    clip,
-                    previous_item,
-                    normalized_clip_speed,
-                    video_width,
-                    video_height,
-                    fit_mode,
-                    tail_file=tail_file,
-                )
+                try:
+                    clip, crossfade_source = _crossfade_from_previous(
+                        clip,
+                        previous_item,
+                        normalized_clip_speed,
+                        video_width,
+                        video_height,
+                        fit_mode,
+                        tail_file=tail_file,
+                    )
+                except Exception as exc:
+                    # A failed dissolve must never cost the clip itself.
+                    logger.warning(f"crossfade skipped for clip {i+1}: {exc}")
 
             if clip.duration > max_clip_duration:
                 clip = clip.subclipped(0, max_clip_duration)

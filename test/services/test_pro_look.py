@@ -117,6 +117,39 @@ class TestCrossfade(unittest.TestCase):
         self.assertGreater(after[2], 200)
 
 
+class TestCrossfadeAtSourceEnd(unittest.TestCase):
+    def test_previous_shot_ending_with_its_source_does_not_drop_clips(self):
+        # Regression: the tail past the end of a source used to be an empty
+        # file, which made every following clip fail.
+        for fast in (True, False):
+            with self.subTest(fast=fast), tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+                config.app, {"video_resolution": "720p", "fast_clip_preparation": fast}
+            ):
+                red = os.path.join(tmp, "red.mp4")
+                blue = os.path.join(tmp, "blue.mp4")
+                audio = os.path.join(tmp, "a.mp3")
+                out = os.path.join(tmp, "combined.mp4")
+                _color_video(red, "red", 2)  # shorter than max clip duration
+                _color_video(blue, "blue", 6)
+                _ffmpeg("-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "6", audio)
+                with mock.patch.object(video.logger, "error") as error_log:
+                    video.combine_videos(
+                        combined_video_path=out,
+                        video_paths=[red, blue],
+                        audio_file=audio,
+                        video_aspect=VideoAspect.landscape,
+                        video_concat_mode=VideoConcatMode.sequential,
+                        video_transition_mode=VideoTransitionMode.crossfade,
+                        max_clip_duration=4,
+                        threads=1,
+                    )
+                error_log.assert_not_called()
+                blend = _frame_rgb(out, 2.2)  # red still frame dissolving into blue
+                self.assertGreater(blend[0], 40)
+                self.assertGreater(blend[2], 40)
+                self.assertGreater(_frame_rgb(out, 4.5)[2], 200)
+
+
 class TestFastClipPreparation(unittest.TestCase):
     def test_segment_is_cut_scaled_and_sped_up(self):
         with tempfile.TemporaryDirectory() as tmp:
