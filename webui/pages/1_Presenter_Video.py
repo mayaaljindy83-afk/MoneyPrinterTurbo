@@ -71,6 +71,15 @@ TEXT = {
     "need_token": ("Add your Kaggle token in step 1 first.", "حطّي مفتاح Kaggle بالخطوة 1 أول."),
     "need_presenter": ("Create a presenter in step 2 first.", "اعملي مقدّمة بالخطوة 2 أول."),
     "ready": ("Your video is ready", "الفيديو جاهز"),
+    "interrupted": ("This job stopped on the laptop (it was closed, slept or the drive was removed). The work on "
+                    "Kaggle kept going. Press Continue to fetch it and finish.",
+                    "هالشغل وقف عاللابتوب (انطفى، أو نام، أو انشال الهارد). الشغل على Kaggle ضل ماشي. "
+                    "اضغطي كمّلي لحتى يجيبه ويخلّص."),
+    "continue": ("Continue (fetch from Kaggle and finish)", "كمّلي (جيبي الشغل من Kaggle وخلّصي)"),
+    "safe_off": ("You can turn the laptop off now. The work continues on Kaggle; later open this page and press "
+                 "Continue.",
+                 "فيكي تطفي اللابتوب هلأ. الشغل بيكمّل على Kaggle، وبعدين افتحي هالصفحة واضغطي كمّلي."),
+    "stopped_jobs": ("Jobs waiting to be continued", "مشاريع ناطرة تكمّليها"),
 }
 
 arabic = st.radio("Language / اللغة", ["العربية", "English"], horizontal=True, key="presenter_ui_lang") == "العربية"
@@ -83,6 +92,10 @@ def t(key: str) -> str:
 
 st.title(t("title"))
 st.caption(t("intro"))
+
+waiting = [j for j in job_package.list_jobs() if studio.was_interrupted(j)]
+if waiting:
+    st.warning(f"{t('stopped_jobs')}: " + ", ".join(waiting))
 
 # ----------------------------------------------------------------------------- 1. Kaggle
 with st.expander(t("kaggle"), expanded=not kaggle_agent.configured_token()):
@@ -128,11 +141,18 @@ with col_photo:
 with st.expander(t("create_ai")):
     if st.button(t("create_btn"), disabled=not kaggle_agent.configured_token()):
         st.session_state["create_job"] = studio.start_presenter_creation(description, kaggle_agent.configured_token())
-    create_job = st.session_state.get("create_job")
+    create_job = st.session_state.get("create_job") or next(iter(studio.creation_jobs()), None)
     if create_job:
         status = studio.read_status(create_job)
         st.write(f"{t('status')}: **{status.get('state')}** {status.get('kaggle', '')}")
         st.code("\n".join(status.get("log", [])[-8:]) or "...")
+        if studio.was_interrupted(create_job):
+            st.warning(t("interrupted"))
+            if st.button(t("continue"), key=f"resume_{create_job}", disabled=not kaggle_agent.configured_token()):
+                studio.start_resume(create_job, kaggle_agent.configured_token())
+                st.rerun()
+        elif studio.is_busy(create_job) and status.get("kaggle") in ("running", "queued"):
+            st.caption(t("safe_off"))
         pictures = studio.candidates(create_job)
         for column, picture in zip(st.columns(max(1, len(pictures))), pictures):
             with column:
@@ -180,7 +200,7 @@ if not names:
     st.info(t("need_presenter"))
 
 # ----------------------------------------------------------------------------- 4. Render
-jobs = [j for j in job_package.list_jobs() if job_package.load_plan(j).get("kind") != "create_presenter"]
+jobs = [j for j in job_package.list_jobs() if not studio.is_creation_job(j)]
 if jobs:
     st.subheader(t("render"))
     current_job = st.session_state.get("presenter_job")
@@ -215,12 +235,20 @@ if jobs:
     if col_again.button(t("assemble"), disabled=busy or not studio.rendered_shots(job_id)):
         studio.start_assembly(job_id, options)
         st.rerun()
+    if studio.was_interrupted(job_id):
+        st.warning(t("interrupted"))
+        if st.button(t("continue"), type="primary", key=f"resume_{job_id}",
+                     disabled=not kaggle_agent.configured_token()):
+            studio.start_resume(job_id, kaggle_agent.configured_token(), options)
+            st.rerun()
 
     @st.fragment(run_every="15s")
     def show_status():
         status = studio.read_status(job_id)
         st.write(f"{t('status')}: **{status.get('state', 'new')}** {status.get('kaggle', '')}")
         st.progress(min(1.0, float(status.get("progress", 0) or 0)))
+        if studio.is_busy(job_id) and status.get("kaggle") in ("running", "queued"):
+            st.caption(t("safe_off"))
         st.code("\n".join(status.get("log", [])[-12:]) or "...")
         final = status.get("final")
         if status.get("state") == "done" and final and os.path.isfile(final):

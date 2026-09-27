@@ -71,6 +71,16 @@ class TestPresenterPage(unittest.TestCase):
         app = self._app()
         self.assertTrue(any("sending the job to Kaggle" in c.value for c in app.code))
 
+    def test_interrupted_job_offers_continue(self):
+        src = os.path.join(self.tmp, "p.png")
+        Image.new("RGB", (400, 600), (200, 170, 160)).save(src)
+        profiles.save_presenter(profiles.Presenter(name="Lina"), [src])
+        plan = studio.plan_video("t", "Hello there. " * 20, "en-US", "16:9", "Lina")
+        studio.set_status(plan["job_id"], "running", "sending the job to Kaggle", kaggle="running")
+        app = self._app()
+        self.assertTrue(any(plan["job_id"] in w.value for w in app.warning))
+        self.assertTrue(any(b.label.startswith("كمّلي") for b in app.button))
+
 
 if __name__ == "__main__":
     unittest.main()

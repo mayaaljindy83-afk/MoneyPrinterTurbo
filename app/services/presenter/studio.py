@@ -243,6 +243,47 @@ def start_kaggle_render(job_id: str, token: str, options: dict | None = None, ag
     _background(job_id, _run_on_kaggle, job_id, token, options or {}, agent)
 
 
+ACTIVE_STATES = {"queued", "preparing", "running", "rendered", "assembling"}
+
+
+def was_interrupted(job_id: str) -> bool:
+    """The job was working when the program stopped (laptop off, window closed, drive removed)."""
+    return read_status(job_id).get("state") in ACTIVE_STATES and not is_busy(job_id)
+
+
+def is_creation_job(job_id: str) -> bool:
+    try:
+        return job_package.load_plan(job_id).get("kind") == "create_presenter"
+    except (OSError, ValueError):
+        return False
+
+
+def _resume(job_id: str, token: str, options: dict, agent=None) -> None:
+    agent = agent or KaggleAgent(token=token, log=lambda m: set_status(job_id, message=m))
+    creation = is_creation_job(job_id)
+    set_status(job_id, "running", "continuing: checking Kaggle", error="")
+    package_ready = os.path.isfile(os.path.join(job_package.job_dir(job_id), "package", "job.json"))
+    if not creation and not package_ready:
+        prepare_package(job_id)
+    summary = agent.resume(job_id, max_runs=1 if creation else 4,
+                           on_status=lambda s: set_status(job_id, kaggle=s))
+    if creation:
+        set_status(job_id, "done", "candidates ready")
+        return
+    set_status(job_id, "rendered", f"{summary.get('done', 0)}/{summary.get('total', 0)} shots rendered",
+               summary=summary)
+    render_final(job_id, options)
+
+
+def start_resume(job_id: str, token: str, options: dict | None = None, agent=None) -> None:
+    """Continue a job after a break: download finished work from Kaggle, run what is missing, assemble."""
+    _background(job_id, _resume, job_id, token, options or {}, agent)
+
+
+def creation_jobs() -> list[str]:
+    return [j for j in job_package.list_jobs() if is_creation_job(j)]
+
+
 def start_assembly(job_id: str, options: dict | None = None) -> None:
     _background(job_id, render_final, job_id, options or {})
 

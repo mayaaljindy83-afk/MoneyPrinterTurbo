@@ -342,3 +342,68 @@ class TestTenSecondJob(StorageCase):
         self.assertEqual([s["type"] for s in plan["shots"]], ["TALK", "WALK"])
         seconds = sum(planner.estimate_seconds(s["narration"], "ar") for s in plan["shots"])
         self.assertTrue(5 <= seconds <= 12, seconds)
+
+
+class TestResumeAfterBreak(StorageCase):
+    def _job(self):
+        presenter = self._presenter()
+        shots = [{"id": f"s0{i}", "type": "TALK", "narration": "مرحبا"} for i in (1, 2, 3)]
+        with mock.patch.object(job_package.voice, "create_subtitle", _fake_subtitle):
+            job_package.build_package("job1", presenter, shots, {"aspect": "16:9"}, tts=_fake_tts)
+
+    def _agent(self, api):
+        return kaggle_agent.KaggleAgent(token="t", api=api, poll_seconds=0, log=lambda m: None,
+                                        sleep=lambda s: None)
+
+    def test_finished_run_is_only_downloaded(self):
+        self._job()
+        api = FakeKaggleApi([["s01", "s02", "s03"]])
+        api.run, api.polls = 0, 0  # the run started before the laptop was turned off
+        agent = self._agent(api)
+        agent._save_state("job1", dataset="maya/mpt-job-job1", kernel="maya/mpt-presenter-job1")
+        summary = agent.resume("job1")
+        self.assertTrue(summary["complete"])
+        self.assertEqual(api.pushed, [])  # nothing started again
+        self.assertEqual(api.calls, [])
+
+    def test_partial_run_continues_with_the_missing_shots(self):
+        self._job()
+        api = FakeKaggleApi([["s01"], ["s02", "s03"]])
+        api.run, api.polls = 0, 0
+        agent = self._agent(api)
+        agent._save_state("job1", dataset="maya/mpt-job-job1", kernel="maya/mpt-presenter-job1")
+        summary = agent.resume("job1")
+        self.assertTrue(summary["complete"])
+        self.assertEqual(len(api.pushed), 1)
+        self.assertEqual(api.calls, [("version", "resume")])
+        self.assertIn("previous/shots/s01.mp4", api.last_zip)
+
+    def test_job_never_sent_is_sent(self):
+        self._job()
+        api = FakeKaggleApi([["s01", "s02", "s03"]])
+        self.assertTrue(self._agent(api).resume("job1")["complete"])
+        self.assertEqual(api.calls, [("create", False)])
+
+    def test_studio_detects_and_resumes_an_interrupted_job(self):
+        from app.services.presenter import studio
+
+        self._presenter()
+        plan = studio.plan_video("Test", "Hello and welcome. This is a test.", "en-US", "16:9", "Lina",
+                                 generate=lambda p: "[]")
+        job_id = plan["job_id"]
+        studio.set_status(job_id, "running", "sending the job to Kaggle", kaggle="running")
+        self.assertTrue(studio.was_interrupted(job_id))  # no thread: the program was restarted
+
+        class ResumeAgent(FakeAgent):
+            def resume(self, job_id, max_runs=4, on_status=None):
+                return self.run_job(job_id, on_status=on_status)
+
+        with mock.patch.object(job_package.voice, "tts", _fake_tts), \
+                mock.patch.object(job_package.voice, "create_subtitle", _fake_subtitle), \
+                mock.patch.dict(config.app, {"video_resolution": "720p"}):
+            studio.start_resume(job_id, "token", {"bgm_type": ""}, agent=ResumeAgent())
+            studio._threads[job_id].join(timeout=300)
+        status = studio.read_status(job_id)
+        self.assertEqual(status["state"], "done", status)
+        self.assertFalse(studio.was_interrupted(job_id))
+        self.assertTrue(os.path.isfile(status["final"]))
