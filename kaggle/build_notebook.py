@@ -1,7 +1,7 @@
-"""Build kaggle/ai_clips_wan22.ipynb from kaggle/wan_clips.py.
+"""Build the Kaggle and Google Colab notebooks from kaggle/wan_clips.py.
 
-The notebook embeds wan_clips.py with %%writefile so it works without
-cloning this repository on Kaggle. Run after editing wan_clips.py:
+Both notebooks embed wan_clips.py with %%writefile so they work without
+cloning this repository. Run after editing wan_clips.py:
 
     python kaggle/build_notebook.py
 """
@@ -14,6 +14,11 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "wan_clips.py")
 NOTEBOOK = os.path.join(HERE, "ai_clips_wan22.ipynb")
+COLAB_NOTEBOOK = os.path.join(HERE, "ai_clips_wan22_colab.ipynb")
+COLAB_URL = (
+    "https://colab.research.google.com/github/mayaaljindy83-afk/MoneyPrinterTurbo/"
+    "blob/main/kaggle/ai_clips_wan22_colab.ipynb"
+)
 
 
 def markdown(text: str) -> dict:
@@ -47,6 +52,22 @@ INTRO = """
 ⏱️ أول تشغيل بياخد تقريباً 10–15 دقيقة للتثبيت وتنزيل النموذج (حوالي 19GB). بعد هيك كل مقطع مدته 5 ثواني بياخد عدة دقايق على T4، والدفتر بيكتب الوقت الحقيقي لكل مقطع. Kaggle بيعطي 30 ساعة GPU مجانية بالأسبوع.
 """
 
+COLAB_INTRO = """
+# 🎬 مقاطع فيديو بالذكاء الاصطناعي ببلاش (Wan 2.2 على Google Colab)
+
+هاد الدفتر بيولّد مقاطع فيديو قصيرة بالذكاء الاصطناعي من وصف مكتوب، على كرت الشاشة المجاني تبع Google Colab، وبعدين بتحطيها بفيديوهاتك الطويلة بـ MoneyPrinterTurbo. **ما بدو تأكيد رقم موبايل**، بس حساب Google.
+
+**قبل ما تبلشي:**
+1. من القائمة فوق اختاري **Runtime** ← **Change runtime type** ← **T4 GPU** ← **Save**.
+2. الصقي الوصفات بالخلية التانية (**PROMPTS**)، سطر لكل مقطع. فيكي تنسخيهن من MoneyPrinterTurbo: **AI Clips (Kaggle)** ← **Create prompts for Kaggle**.
+3. من فوق، اضغطي **Runtime** ← **Run all**. إذا سألك "This notebook was not authored by Google"، اضغطي **Run anyway**.
+4. **خلّي الصفحة مفتوحة** لحد ما يخلص. إذا سكّرتيها أو ضلّت فترة طويلة بدون حركة، Colab بيفصل الجلسة.
+
+**بالآخر:** المتصفح بينزّل `ai_clips.zip` لحاله. فكّيه بمجلد جديد جوّا `E:\\MoneyPrinterData\\ai_clips\\` (مثلاً `E:\\MoneyPrinterData\\ai_clips\\ocean`).
+
+⏱️ أول تشغيل بكل جلسة بياخد تقريباً 10–15 دقيقة للتثبيت وتنزيل النموذج، لأن Colab بيمسح كل شي لما تسكر الجلسة. فالأحسن تولّدي كل مقاطع الفيديو مرة وحدة. بعد هيك كل مقطع مدته 5 ثواني بياخد عدة دقايق، والدفتر بيكتب الوقت الحقيقي. وقت Colab المجاني محدود ومش ثابت (عادة كم ساعة باليوم)، بس بيكفي لكم فيديو.
+"""
+
 SETTINGS = '''
 # ---- PROMPTS: one English prompt per line (one line = one clip) ----
 PROMPTS = """
@@ -59,7 +80,7 @@ QUALITY = "fast"       # "fast" = 960x544 (quicker), "hd" = 1280x704 (native 720
 SECONDS = 5            # clip length in seconds
 FAST = True            # True = FastWan (about 8 steps). False = official 20 steps (much slower)
 
-with open("/kaggle/working/prompts.txt", "w", encoding="utf-8") as f:
+with open("{workdir}/prompts.txt", "w", encoding="utf-8") as f:
     f.write(PROMPTS.strip() + "\\n")
 print(len([line for line in PROMPTS.splitlines() if line.strip()]), "prompts saved")
 '''
@@ -68,10 +89,10 @@ RUN = """
 import subprocess
 import sys
 
-command = [sys.executable, "/kaggle/working/wan_clips.py",
-           "--prompts", "/kaggle/working/prompts.txt",
-           "--out", "/kaggle/working/ai_clips",
-           "--aspect", ASPECT, "--quality", QUALITY, "--seconds", str(SECONDS)]
+command = [sys.executable, "{workdir}/wan_clips.py",
+           "--prompts", "{workdir}/prompts.txt",
+           "--out", "{workdir}/ai_clips",
+           "--aspect", ASPECT, "--quality", QUALITY, "--seconds", str(SECONDS){extra}]
 if not FAST:
     command.append("--no-fast")
 subprocess.run(command, check=True)
@@ -81,9 +102,15 @@ PREVIEW = """
 # Preview the first clip here (optional)
 from IPython.display import Video
 import glob
-clips = sorted(glob.glob("/kaggle/working/ai_clips/*.mp4"))
+clips = sorted(glob.glob("{workdir}/ai_clips/*.mp4"))
 print(len(clips), "clips")
 Video(clips[0], embed=True, width=640) if clips else None
+"""
+
+COLAB_DOWNLOAD = """
+# Download ai_clips.zip to your computer
+from google.colab import files
+files.download("/content/ai_clips.zip")
 """
 
 HELP = """
@@ -97,21 +124,42 @@ HELP = """
 النموذج: **Wan 2.2 TI2V-5B** (رخصة Apache-2.0)، ومعه FastWan LoRA للسرعة، عن طريق ComfyUI.
 """
 
+COLAB_HELP = """
+### مشاكل شائعة
+- **`Cannot connect to GPU backend` أو ما في T4:** وقت Colab المجاني خلص لليوم، أو ما في كروت فاضية هلق. جربي بعد كم ساعة.
+- **`No CUDA GPUs are available`:** نسيتي تختاري **T4 GPU** من **Runtime** ← **Change runtime type**.
+- **الجلسة وقفت أو انقطعت (`Your session crashed` أو انفصلت):** غالباً خلصت الرام. خلّي `QUALITY = "fast"` و`SECONDS` على 3–5، وبعدين **Runtime** ← **Run all** مرة تانية.
+- **`CUDA out of memory`:** نفس الحل: `QUALITY = "fast"` أو نزّلي `SECONDS`.
+- **المقاطع فيها نويز أو ألوان غريبة:** جربي `FAST = False` (أبطأ بس أدق).
+- **ما نزل الـ zip لحاله:** من الشريط الشمال افتحي 📁 **Files**، وكليك يمين على `ai_clips.zip` ← **Download**.
+- سجل ComfyUI الكامل موجود بـ `/tmp/comfyui.log`.
+
+النموذج: **Wan 2.2 TI2V-5B** (رخصة Apache-2.0)، ومعه FastWan LoRA للسرعة، عن طريق ComfyUI. على Colab بيتحمّل بدقة fp8 ليساع بالرام المجانية.
+"""
+
+
+def _script() -> str:
+    with open(SCRIPT, encoding="utf-8") as fp:
+        return fp.read()
+
+
+def _cells(intro: str, workdir: str, extra_args: str, help_text: str, tail: list[dict]) -> list[dict]:
+    return [
+        markdown(intro),
+        code(SETTINGS.replace("{workdir}", workdir)),
+        markdown("### الكود (ما في داعي تعدّلي فيه)"),
+        code(f"%%writefile {workdir}/wan_clips.py\n" + _script()),
+        code(RUN.replace("{workdir}", workdir).replace("{extra}", extra_args)),
+        code(PREVIEW.replace("{workdir}", workdir)),
+        *tail,
+        markdown(help_text),
+    ]
+
 
 def build() -> dict:
-    with open(SCRIPT, encoding="utf-8") as fp:
-        script = fp.read()
-    cells = [
-        markdown(INTRO),
-        code(SETTINGS),
-        markdown("### الكود (ما في داعي تعدّلي فيه)"),
-        code("%%writefile /kaggle/working/wan_clips.py\n" + script),
-        code(RUN),
-        code(PREVIEW),
-        markdown(HELP),
-    ]
+    """Kaggle notebook."""
     return {
-        "cells": cells,
+        "cells": _cells(INTRO, "/kaggle/working", "", HELP, []),
         "metadata": {
             "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
             "language_info": {"name": "python"},
@@ -122,11 +170,33 @@ def build() -> dict:
     }
 
 
+def build_colab() -> dict:
+    """Google Colab notebook: fp8 weights for the 12 GB RAM free tier."""
+    return {
+        "cells": _cells(
+            COLAB_INTRO,
+            "/content",
+            ',\n           "--weight-dtype", "fp8_e4m3fn"',
+            COLAB_HELP,
+            [code(COLAB_DOWNLOAD)],
+        ),
+        "metadata": {
+            "accelerator": "GPU",
+            "colab": {"gpuType": "T4", "provenance": []},
+            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+            "language_info": {"name": "python"},
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+
+
 def main() -> None:
-    with open(NOTEBOOK, "w", encoding="utf-8") as fp:
-        json.dump(build(), fp, ensure_ascii=False, indent=1)
-        fp.write("\n")
-    print(f"wrote {NOTEBOOK}")
+    for path, notebook in ((NOTEBOOK, build()), (COLAB_NOTEBOOK, build_colab())):
+        with open(path, "w", encoding="utf-8") as fp:
+            json.dump(notebook, fp, ensure_ascii=False, indent=1)
+            fp.write("\n")
+        print(f"wrote {path}")
 
 
 if __name__ == "__main__":

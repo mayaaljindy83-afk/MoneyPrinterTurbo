@@ -32,6 +32,23 @@ class TestNotebook(unittest.TestCase):
             "run: python kaggle/build_notebook.py",
         )
 
+    def test_committed_colab_notebook_matches_script(self):
+        with open(build_notebook.COLAB_NOTEBOOK, encoding="utf-8") as fp:
+            committed = json.load(fp)
+        self.assertEqual(committed, build_notebook.build_colab(), "run: python kaggle/build_notebook.py")
+
+    def test_colab_notebook_uses_fp8_and_content_paths(self):
+        notebook = build_notebook.build_colab()
+        sources = ["".join(cell["source"]) for cell in notebook["cells"]]
+        run_cell = next(
+            s for s in sources if "subprocess.run(command" in s and not s.startswith("%%writefile")
+        )
+        self.assertIn('"--weight-dtype", "fp8_e4m3fn"', run_cell)
+        self.assertIn("/content/prompts.txt", run_cell)
+        self.assertTrue(any("files.download" in s for s in sources))
+        self.assertFalse(any("/kaggle/" in s for s in sources if not s.startswith("%%writefile")))
+        self.assertEqual(notebook["metadata"]["colab"]["gpuType"], "T4")
+
     def test_notebook_embeds_script(self):
         cell = "".join(build_notebook.build()["cells"][3]["source"])
         with open(build_notebook.SCRIPT, encoding="utf-8") as fp:
@@ -71,6 +88,12 @@ class TestWorkflow(unittest.TestCase):
             for value in node["inputs"].values():
                 if isinstance(value, list):
                     self.assertIn(value[0], graph)
+
+    def test_fp8_weights_option(self):
+        graph = wan_clips.build_workflow("a reef", "p", 960, 544, 121, 7, weight_dtype="fp8_e4m3fn")
+        self.assertEqual(graph["1"]["inputs"]["weight_dtype"], "fp8_e4m3fn")
+        default = wan_clips.build_workflow("a reef", "p", 960, 544, 121, 7)
+        self.assertEqual(default["1"]["inputs"]["weight_dtype"], "default")
 
     def test_official_workflow_has_no_lora(self):
         graph = wan_clips.build_workflow("a reef", "p", 1280, 704, 121, 7, fast=False)

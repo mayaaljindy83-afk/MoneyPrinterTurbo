@@ -10,6 +10,10 @@ Model choice (September 2026, free Kaggle T4 16 GB / 29 GB RAM):
   at CFG 1, which is what makes a T4 usable (roughly 3-5x faster).
 The 14B Wan models and LTX-2 need more VRAM/RAM than Kaggle offers.
 
+Works on Kaggle (kaggle/ai_clips_wan22.ipynb) and on Google Colab
+(kaggle/ai_clips_wan22_colab.ipynb). Colab's free tier has only ~12 GB RAM,
+so the Colab notebook loads the video model with fp8 weights.
+
 Run:  python wan_clips.py --prompts prompts.txt --out /kaggle/working/ai_clips
 """
 
@@ -79,6 +83,9 @@ def frames_for(seconds: float) -> int:
     return -(-(frames - 1) // 4) * 4 + 1
 
 
+WEIGHT_DTYPES = ("default", "fp8_e4m3fn")
+
+
 def build_workflow(
     prompt: str,
     prefix: str,
@@ -88,11 +95,14 @@ def build_workflow(
     seed: int,
     fast: bool = True,
     steps: int | None = None,
+    weight_dtype: str = "default",
 ) -> dict:
     """ComfyUI API graph for Wan 2.2 TI2V-5B text-to-video (frames saved as PNG)."""
     unet = os.path.basename(MODELS["unet"][1])
     graph = {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
+        # fp8 halves the model's memory (needed on Colab's 12 GB RAM); the T4
+        # still computes in fp16.
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": weight_dtype}},
         "4": {"class_type": "CLIPLoader", "inputs": {"clip_name": os.path.basename(MODELS["text_encoder"][1]), "type": "wan"}},
         "5": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["4", 0]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": NEGATIVE, "clip": ["4", 0]}},
@@ -280,7 +290,7 @@ def lora_warning() -> None:
 
 
 def generate(prompts: list[str], out_dir: str, aspect: str, quality: str, seconds: float,
-             fast: bool, seed: int, steps: int | None) -> list[str]:
+             fast: bool, seed: int, steps: int | None, weight_dtype: str = "default") -> list[str]:
     width, height = SIZES[(aspect, quality)]
     length = frames_for(seconds)
     os.makedirs(out_dir, exist_ok=True)
@@ -294,7 +304,9 @@ def generate(prompts: list[str], out_dir: str, aspect: str, quality: str, second
             continue
         started = time.time()
         log(f"[{index}/{len(prompts)}] {prompt[:90]}")
-        graph = build_workflow(prompt, f"clip_{index:03d}", width, height, length, seed + index, fast, steps)
+        graph = build_workflow(
+            prompt, f"clip_{index:03d}", width, height, length, seed + index, fast, steps, weight_dtype
+        )
         try:
             entry = queue_and_wait(graph)
             frames_to_mp4(entry, target)
@@ -308,6 +320,14 @@ def generate(prompts: list[str], out_dir: str, aspect: str, quality: str, second
     return done
 
 
+def default_work_dir() -> str:
+    """Kaggle keeps /kaggle/working as output; Colab's files panel shows /content."""
+    for folder in ("/kaggle/working", "/content"):
+        if os.path.isdir(folder):
+            return folder
+    return os.getcwd()
+
+
 def make_zip(files: list[str], zip_path: str) -> None:
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as archive:
         for file in files:
@@ -318,13 +338,15 @@ def make_zip(files: list[str], zip_path: str) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--prompts", required=True)
-    parser.add_argument("--out", default="/kaggle/working/ai_clips")
+    parser.add_argument("--out", default=os.path.join(default_work_dir(), "ai_clips"))
     parser.add_argument("--aspect", choices=["landscape", "portrait"], default="landscape")
     parser.add_argument("--quality", choices=["hd", "fast"], default="fast")
     parser.add_argument("--seconds", type=float, default=5.0)
     parser.add_argument("--no-fast", action="store_true", help="official 20-step sampling (slower)")
     parser.add_argument("--steps", type=int)
     parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument("--weight-dtype", choices=WEIGHT_DTYPES, default="default",
+                        help="fp8_e4m3fn for low-RAM machines such as free Google Colab")
     parser.add_argument("--skip-setup", action="store_true")
     args = parser.parse_args(argv)
 
@@ -336,7 +358,8 @@ def main(argv=None) -> int:
     server = start_server()
     try:
         check_nodes(fast)
-        files = generate(prompts, args.out, args.aspect, args.quality, args.seconds, fast, args.seed, args.steps)
+        files = generate(prompts, args.out, args.aspect, args.quality, args.seconds, fast,
+                         args.seed, args.steps, args.weight_dtype)
     finally:
         server.terminate()
     if not files:
