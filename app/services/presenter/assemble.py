@@ -39,6 +39,12 @@ def _ffmpeg(args: list[str]) -> None:
         raise RuntimeError(f"ffmpeg failed: {result.stderr.strip()[-1500:]}")
 
 
+# Windows limits a command line to 32767 characters. Longer filter graphs are split in halves
+# (never through a filter file: ``-filter_complex_script`` is gone in FFmpeg 8 and ``-/filter_complex``
+# is missing in older versions).
+INLINE_FILTER_LIMIT = 20000
+
+
 def _scale_filter(width: int, height: int) -> str:
     return (f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,"
             f"crop={width}:{height},setsar=1,unsharp=5:5:0.4")
@@ -83,14 +89,15 @@ def shot_source(job_root: str, package: str, shot: dict, presenter_ref: str, wor
     return _still_clip(still, target, width, height, duration + FADE), "still"
 
 
-def join_clips(clips: list[str], durations: list[float], output: str, width: int, height: int) -> str:
-    """Normalise and crossfade; the result lasts exactly sum(durations)."""
+def join_clips(clips: list[str], durations: list[float], output: str, width: int, height: int,
+               extend_last: bool = False) -> str:
+    """Normalise and crossfade; the result lasts exactly sum(durations) (+FADE if ``extend_last``)."""
     inputs: list[str] = []
     filters: list[str] = []
     last = len(clips) - 1
     for i, (clip, seconds) in enumerate(zip(clips, durations)):
         inputs += ["-i", clip]
-        length = seconds + (FADE if i < last else 0)
+        length = seconds + (FADE if i < last or extend_last else 0)
         filters.append(f"[{i}:v]{_scale_filter(width, height)},fps={FPS},format=yuv420p,"
                        f"tpad=stop_mode=clone:stop_duration={length:.3f},"
                        f"trim=duration={length:.3f},setpts=PTS-STARTPTS[v{i}]")
@@ -100,14 +107,20 @@ def join_clips(clips: list[str], durations: list[float], output: str, width: int
         offset += durations[i - 1]
         filters.append(f"[{current}][v{i}]xfade=transition=fade:duration={FADE}:offset={offset:.3f}[x{i}]")
         current = f"x{i}"
-    script = output + ".filter.txt"
-    with open(script, "w", encoding="utf-8") as fp:
-        fp.write(";\n".join(filters))
-    try:
-        _ffmpeg([*inputs, "-filter_complex_script", script, "-map", f"[{current}]", "-an",
-                 "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", output])
-    finally:
-        os.remove(script)
+    graph = ";".join(filters)
+    if len(graph) > INLINE_FILTER_LIMIT and len(clips) > 2:
+        half = len(clips) // 2
+        first = join_clips(clips[:half], durations[:half], output + ".part1.mp4", width, height, extend_last=True)
+        second = join_clips(clips[half:], durations[half:], output + ".part2.mp4", width, height, extend_last)
+        try:
+            return join_clips([first, second], [sum(durations[:half]), sum(durations[half:])], output, width,
+                              height, extend_last)
+        finally:
+            for part in (first, second):
+                os.remove(part)
+    # The graph goes inline: that works with every FFmpeg version.
+    _ffmpeg([*inputs, "-filter_complex", graph, "-map", f"[{current}]", "-an", "-c:v", "libx264",
+             "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", output])
     return output
 
 
