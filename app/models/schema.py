@@ -29,6 +29,8 @@ class VideoTransitionMode(str, Enum):
     slide_out = "SlideOut"
     zoom_in = "ZoomIn"
     zoom_out = "ZoomOut"
+    # The previous shot keeps playing for a moment and dissolves into the next.
+    crossfade = "Crossfade"
 
 
 class VideoAspect(str, Enum):
@@ -37,12 +39,16 @@ class VideoAspect(str, Enum):
     square = "1:1"
 
     def to_resolution(self):
+        # [app] video_resolution = "720p" renders about 2x faster on a laptop
+        # CPU and downloads much smaller stock clips; 1080p stays the default.
+        short_side = 720 if config.app.get("video_resolution") == "720p" else 1080
+        long_side = short_side * 16 // 9
         if self == VideoAspect.landscape:
-            return 1920, 1080
+            return long_side, short_side
         elif self == VideoAspect.portrait:
-            return 1080, 1920
+            return short_side, long_side
         elif self == VideoAspect.square:
-            return 1080, 1080
+            return short_side, short_side
         raise ValueError(f"unsupported video aspect: {self}")
 
 
@@ -160,6 +166,10 @@ class VideoParams(BaseModel):
     # Long video mode: > 0 writes the script section by section to reach
     # roughly this many minutes of narration (paragraph_number is ignored).
     video_duration_minutes: float = Field(default=0, ge=0, le=10)
+    # Named subtitle look from app/services/subtitle_styles.py ("" = custom).
+    subtitle_style: str = ""
+    # Prepend/append intro.* and outro.* from the branding folder.
+    add_intro_outro: bool = False
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
 

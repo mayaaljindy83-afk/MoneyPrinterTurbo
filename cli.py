@@ -182,6 +182,7 @@ _TRANSITION_MODE_VALUES = {
     "slide-out": "SlideOut",
     "zoom-in": "ZoomIn",
     "zoom-out": "ZoomOut",
+    "crossfade": "Crossfade",
 }
 
 # 单任务 argparse 和批量清单必须共享同一份字幕位置取值，避免再次出现

@@ -38,6 +38,14 @@ music_dir = ""
 # only from your folder (the bundled songs have no documented licence).
 bgm_prefer_user_music = false
 
+# Output size: "1080p" (default) or "720p". 720p renders roughly twice as
+# fast on a laptop CPU and downloads much smaller stock clips.
+video_resolution = "1080p"
+
+# Folder holding intro.* / outro.* (mp4, mov, png, jpg...) that are added
+# when "intro/outro" is enabled for a video. Empty = <storage_dir>/branding.
+branding_dir = ""
+
 # -----------------------------------------------------------------------------
 # General / 通用设置
 # -----------------------------------------------------------------------------

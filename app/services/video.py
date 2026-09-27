@@ -25,6 +25,7 @@ from moviepy import (
     TextClip,
     VideoFileClip,
     afx,
+    vfx,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
 from PIL import Image, ImageDraw, ImageFont
@@ -40,6 +41,7 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
+from app.services import subtitle_styles
 from app.services.utils import video_effects
 from app.utils import file_security, rtl_text, utils
 
@@ -742,6 +744,49 @@ def _fit_clip_to_canvas(
     ).with_duration(clip.duration)
 
 
+_CROSSFADE_SECONDS = 0.6
+
+
+def _crossfade_from_previous(
+    clip,
+    previous: SubClippedVideoClip,
+    clip_speed: float,
+    target_width: int,
+    target_height: int,
+    fit_mode: VideoFitMode,
+):
+    """Dissolve the end of the previous shot over the start of ``clip``.
+
+    Clips are encoded one by one and joined with FFmpeg's concat demuxer, so
+    a classic overlapping crossfade is not possible. Instead the *previous*
+    source keeps playing past its cut point for a fraction of a second and
+    fades out on top of the new clip. The timeline length is unchanged.
+    Returns the new clip and the opened source that must be closed later.
+    """
+    duration = min(_CROSSFADE_SECONDS, clip.duration / 3)
+    source = _open_video_clip_quietly(previous.file_path)
+    tail_start = min(previous.end_time or source.duration, source.duration)
+    tail_end = min(source.duration, tail_start + duration * clip_speed)
+    if tail_end - tail_start >= duration * clip_speed * 0.9:
+        tail = source.subclipped(tail_start, tail_end)
+        if clip_speed != 1.0:
+            tail = tail.with_speed_scaled(clip_speed)
+    else:
+        # The previous shot ended with its source file: hold its last frame.
+        tail = source.to_ImageClip(t=max(0.0, tail_start - 0.05))
+    tail = _fit_clip_to_canvas(
+        tail.with_duration(duration),
+        target_width=target_width,
+        target_height=target_height,
+        fit_mode=fit_mode,
+    ).with_duration(duration)
+    tail = tail.with_effects([vfx.CrossFadeOut(duration)]).with_start(0)
+    blended = CompositeVideoClip(
+        [clip, tail], size=(target_width, target_height), use_bgclip=True
+    ).with_duration(clip.duration)
+    return blended, source
+
+
 def combine_videos(
     combined_video_path: str,
     video_paths: List[str],
@@ -833,6 +878,7 @@ def combine_videos(
         
     logger.debug(f"total subclipped items: {len(subclipped_items)}")
     
+    previous_item = None
     # Add downloaded clips over and over until the duration of the audio (max_duration) has been reached
     for i, subclipped_item in enumerate(subclipped_items):
         if video_duration >= required_video_duration:
@@ -845,6 +891,7 @@ def combine_videos(
             f"remaining: {required_video_duration - video_duration:.2f}s"
         )
         
+        crossfade_source = None
         try:
             clip = _open_video_clip_quietly(subclipped_item.file_path).subclipped(
                 subclipped_item.start_time, subclipped_item.end_time
@@ -900,6 +947,18 @@ def combine_videos(
                 ]
                 shuffle_transition = random.choice(transition_funcs)
                 clip = shuffle_transition(clip)
+            elif (
+                transition_value == VideoTransitionMode.crossfade.value
+                and previous_item is not None
+            ):
+                clip, crossfade_source = _crossfade_from_previous(
+                    clip,
+                    previous_item,
+                    normalized_clip_speed,
+                    video_width,
+                    video_height,
+                    fit_mode,
+                )
 
             if clip.duration > max_clip_duration:
                 clip = clip.subclipped(0, max_clip_duration)
@@ -917,6 +976,9 @@ def combine_videos(
             # Store clip duration before closing
             clip_duration_saved = clip.duration
             close_clip(clip)
+            if crossfade_source is not None:
+                close_clip(crossfade_source)
+            previous_item = subclipped_item
 
             processed_clips.append(
                 SubClippedVideoClip(
@@ -930,6 +992,8 @@ def combine_videos(
             video_duration += clip_duration_saved
             
         except Exception as e:
+            if crossfade_source is not None:
+                close_clip(crossfade_source)
             logger.error(f"failed to process clip: {str(e)}")
     
     # loop processed clips until the video duration covers the audio duration and the small safety margin.
@@ -1238,6 +1302,17 @@ def generate_video(
     """
     aspect = VideoAspect(params.video_aspect)
     video_width, video_height = aspect.to_resolution()
+
+    # Work on a copy: presets and resolution scaling must not leak back into
+    # the caller's task parameters.
+    params = params.model_copy()
+    if subtitle_styles.apply_subtitle_style(params):
+        logger.info(f"  subtitle style: {params.subtitle_style}")
+    # Subtitle sizes are designed for 1080p; keep proportions at 720p.
+    subtitle_scale = min(video_width, video_height) / 1080
+    if subtitle_scale != 1:
+        params.font_size = max(12, round(float(params.font_size) * subtitle_scale))
+        params.stroke_width = float(params.stroke_width) * subtitle_scale
 
     logger.info(f"generating video: {video_width} x {video_height}")
     logger.info(f"  ① video: {video_path}")

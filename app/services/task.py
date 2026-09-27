@@ -17,6 +17,7 @@ from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams
 from app.services import bgm as bgm_service
 from app.services import (
+    branding,
     elevenlabs_music,
     llm,
     long_script,
@@ -1057,6 +1058,8 @@ def generate_final_videos(
             params=params,
             bgm_file_override=bgm_file_override,
         )
+        if params.add_intro_outro:
+            branding.add_intro_outro(final_video_path)
         if (
             video_music_provider is not None
             and bgm_file_override
