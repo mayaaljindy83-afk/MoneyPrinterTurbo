@@ -4,7 +4,6 @@ import tempfile
 import unittest
 from unittest import mock
 
-import numpy as np
 from moviepy import VideoFileClip
 from PIL import Image
 
