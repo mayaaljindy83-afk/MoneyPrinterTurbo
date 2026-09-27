@@ -256,6 +256,7 @@ def scene_spec(scene: dict, site: dict, portrait: bool, rtl: bool) -> dict:
         spec["cards"] = _cards_for(site, scene, 1)
     elif kind == "WEBSITE_WORLD":
         spec["cards"] = _cards_for(site, scene, 2)
+        spec["heading"] = _shot_path(site, "heading")  # the real page heading, as its own layer
     elif kind == "CTA":
         spec["cta"] = _shot_path(site, asset) if asset.startswith("cta") else _shot_path(site, "cta1")
         spec["logo"] = _shot_path(site, "logo") or branding.find_part("logo")

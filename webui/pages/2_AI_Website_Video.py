@@ -149,6 +149,11 @@ if submitted and (url.strip() or local):
             st.session_state["web_project"] = project["project_id"]
         except website.WebsiteError as exc:
             st.error(str(exc))
+        except Exception as exc:  # never a crashed page: show what went wrong
+            from loguru import logger
+
+            logger.exception("website analysis failed")
+            st.error(f"{type(exc).__name__}: {str(exc).splitlines()[0][:300] if str(exc) else ''}")
 
 # ----------------------------------------------------------------------------- analysis + storyboard
 projects = pipeline.list_projects()

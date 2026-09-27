@@ -135,3 +135,28 @@ class TestLocalSource(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLocalSourceScreenshotTimeout(unittest.TestCase):
+    def test_arabic_local_page_is_analysed_when_screenshots_hang(self):
+        from unittest import mock
+
+        from playwright.sync_api import Page
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+        project = os.path.join(tempfile.mkdtemp(), "qai-vo-launch")
+        make_project(project)
+
+        def hang(*args, **kwargs):
+            raise PlaywrightTimeout("Page.screenshot: Timeout 30000ms exceeded.")
+
+        out = tempfile.mkdtemp()
+        with mock.patch.object(Page, "screenshot", autospec=True, side_effect=hang):
+            data = website_source.read_local_site(project, "/products/academic", out, locale="ar",
+                                                  public_url="https://qai-vo.com")
+        self.assertEqual(data["service"]["name"], "الحقيبة الأكاديمية")
+        layers = {s["id"]: s for s in data["screenshots"] if s.get("layer")}
+        self.assertEqual(layers["card1"]["text"], "باحث الأوراق وروابط DOI")  # the Arabic component
+        self.assertIn("cta1", layers)
+        self.assertEqual(data["brand"]["colors"][0], "#10b981")
+        self.assertTrue(os.path.isfile(os.path.join(out, "screenshots", "logo.png")))  # from the logo file

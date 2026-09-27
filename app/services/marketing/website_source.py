@@ -99,6 +99,15 @@ class _SiteHandler(http.server.BaseHTTPRequestHandler):
         elif path.startswith("/_next/image"):
             source = urllib.parse.parse_qs(parsed.query).get("url", [""])[0]
             target = _inside(project["public_dir"], urllib.parse.unquote(source).lstrip("/"))
+        elif _is_rsc_request(parsed.query, self.headers):
+            # Next.js asks for page data (React Server Components) in the background; answering
+            # with an HTML page makes its router fail and retry. Give the built .rsc or a 404.
+            rel = path.strip("/") or "index"
+            target = _inside(project["pages_dir"], rel + ".rsc")
+            if target and os.path.isfile(target):
+                self._send(target, "text/x-component")
+                return
+            target = ""
         elif not path.startswith("/api/"):
             rel = path.strip("/")
             for candidate in ((rel or "index") + ".html", os.path.join(rel, "index.html"), rel):
@@ -114,10 +123,10 @@ class _SiteHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def _send(self, path: str):
+    def _send(self, path: str, content_type: str = ""):
         import mimetypes
 
-        kind = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        kind = content_type or mimetypes.guess_type(path)[0] or "application/octet-stream"
         if path.endswith(".html"):
             kind = "text/html; charset=utf-8"
         with open(path, "rb") as fp:
@@ -127,6 +136,10 @@ class _SiteHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def _is_rsc_request(query: str, headers) -> bool:
+    return "_rsc=" in (query or "") or headers.get("RSC") == "1" or headers.get("Next-Router-Prefetch") == "1"
 
 
 @contextlib.contextmanager
