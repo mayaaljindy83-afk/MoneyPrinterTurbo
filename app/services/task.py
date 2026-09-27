@@ -17,8 +17,11 @@ from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams
 from app.services import bgm as bgm_service
 from app.services import (
+    ai_clips,
+    branding,
     elevenlabs_music,
     llm,
+    long_script,
     loomloom,
     material,
     metaso_minimax,
@@ -289,10 +292,45 @@ def _mark_task_failed(
     return failure
 
 
+def is_long_video(params) -> bool:
+    return long_script.clamp_minutes(getattr(params, "video_duration_minutes", 0)) > 0
+
+
+def _generate_long_script(task_id, params):
+    def progress(done, total):
+        # Script writing is slow on a laptop CPU; show movement in the UI.
+        sm.state.update_task(task_id, progress=5 + int(5 * done / total))
+
+    try:
+        result = long_script.generate_long_script(
+            subject=params.video_subject,
+            language=params.video_language,
+            minutes=params.video_duration_minutes,
+            voice_rate=params.voice_rate,
+            extra_prompt=params.video_script_prompt,
+            with_terms=not params.video_terms and params.video_source != "local",
+            progress=progress,
+        )
+    except RuntimeError as exc:
+        logger.error(f"failed to generate long video script: {exc}")
+        return ""
+    if result.terms and not params.video_terms:
+        # Ordered per-section terms keep footage in step with the narration
+        # and spread the video over many different clips.
+        params.video_terms = result.terms
+        params.match_materials_to_script = True
+    return result.script
+
+
 def generate_script(task_id, params):
     logger.info("\n\n## generating video script")
     video_script = params.video_script.strip()
-    if not video_script:
+    if is_long_video(params) and params.video_source != "local":
+        # Long videos always follow the narration order with their footage.
+        params.match_materials_to_script = True
+    if not video_script and is_long_video(params):
+        video_script = _generate_long_script(task_id, params)
+    elif not video_script:
         video_script = llm.generate_script(
             video_subject=params.video_subject,
             language=params.video_language,
@@ -313,6 +351,14 @@ def generate_script(task_id, params):
 def generate_terms(task_id, params, video_script):
     logger.info("\n\n## generating video terms")
     video_terms = params.video_terms
+    if not video_terms and is_long_video(params):
+        # A script written or pasted by the user: one set of terms per paragraph.
+        video_terms = []
+        for paragraph in re.split(r"\n\s*\n", utils.remove_pause_tags(video_script)):
+            if paragraph.strip():
+                for term in long_script.generate_section_terms(params.video_subject, paragraph):
+                    if term.lower() not in {t.lower() for t in video_terms}:
+                        video_terms.append(term)
     if not video_terms:
         # 开启素材按文案顺序匹配后，关键词本身也必须按脚本叙事顺序生成；
         # 否则后续即使顺序下载和顺序拼接，也只能复用一组全局主题词，
@@ -880,6 +926,37 @@ def _get_material_source_groups(task_id: str, video_paths: list[str]) -> dict[st
         return {}
 
 
+def _mix_in_ai_clips(params, downloaded_videos: list[str]) -> list[str]:
+    """Add the user's Kaggle-generated clips; a bad folder never fails the task."""
+    try:
+        folder = ai_clips.resolve_ai_clips_folder(params.ai_clips_folder)
+    except ValueError as exc:
+        logger.warning(f"AI clips skipped: {exc}")
+        return downloaded_videos
+    clips = ai_clips.list_ai_clips(folder)
+    logger.info(f"mixing {len(clips)} AI clips from {folder} into {len(downloaded_videos)} stock clips")
+    return ai_clips.mix_ai_clips(downloaded_videos, clips)
+
+
+def order_videos_by_terms(task_id: str, video_paths: list[str], video_terms) -> list[str]:
+    """Group downloaded clips by search term, in script order.
+
+    Ordered downloads are round-robin (one clip per term per round) so every
+    section gets footage. For a long video the clips must then be grouped by
+    term, otherwise the timeline cycles through all topics several times
+    instead of following the narration.
+    """
+    groups = _get_material_source_groups(task_id, video_paths)
+    if not groups or not isinstance(video_terms, list):
+        return video_paths
+    rank = {term: index for index, term in enumerate(video_terms)}
+    positions = {file: index for index, file in enumerate(video_paths)}
+    return sorted(
+        video_paths,
+        key=lambda file: (rank.get(groups.get(file), len(rank)), positions[file]),
+    )
+
+
 def generate_final_videos(
     task_id, params, downloaded_videos, audio_file, subtitle_path, audio_duration
 ):
@@ -1005,6 +1082,8 @@ def generate_final_videos(
             params=params,
             bgm_file_override=bgm_file_override,
         )
+        if params.add_intro_outro:
+            branding.add_intro_outro(final_video_path)
         if (
             video_music_provider is not None
             and bgm_file_override
@@ -1594,6 +1673,10 @@ def _run_pipeline(
         audio_duration,
         loomloom_video_request=loomloom_video_request,
     )
+    if downloaded_videos and is_long_video(params) and params.match_materials_to_script:
+        downloaded_videos = order_videos_by_terms(task_id, downloaded_videos, video_terms)
+    if downloaded_videos and params.ai_clips_folder:
+        downloaded_videos = _mix_in_ai_clips(params, downloaded_videos)
     if not downloaded_videos:
         return _mark_task_failed(
             task_id,

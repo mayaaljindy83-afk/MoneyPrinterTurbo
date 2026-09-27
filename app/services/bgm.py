@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from loguru import logger
 
+from app.config import config
 from app.utils import file_security, utils
 
 
@@ -94,6 +95,13 @@ def uploaded_bgm_dir(create: bool = True) -> str:
     内置歌曲属于代码资源，继续放在 resource/songs；用户上传内容属于运行时数据，
     必须放在 Docker 已挂载的 storage 下，容器重建后才能保留，也不会污染 Git 工作区。
     """
+    music_dir = str(config.app.get("music_dir", "") or "").strip()
+    if music_dir:
+        # A folder the user fills with their own royalty-free tracks.
+        music_dir = os.path.abspath(os.path.expanduser(os.path.expandvars(music_dir)))
+        if create:
+            os.makedirs(music_dir, exist_ok=True)
+        return music_dir
     return utils.storage_dir("bgm", create=create)
 
 
@@ -337,6 +345,12 @@ def list_builtin_bgm_files() -> list[str]:
 
 def list_bgm_files() -> list[str]:
     """列出用户上传和内置的可用背景音乐，重名时优先使用上传文件。"""
+    if config.app.get("bgm_prefer_user_music", False):
+        # The user's own (royalty-free) music folder replaces the bundled
+        # songs, whose licence is unknown, as soon as it contains any track.
+        user_files = _list_bgm_files((uploaded_bgm_dir(create=True),))
+        if user_files:
+            return user_files
     return _list_bgm_files((utils.song_dir(), uploaded_bgm_dir(create=True)))
 
 

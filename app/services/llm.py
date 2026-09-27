@@ -255,6 +255,32 @@ def _extract_qwen_generation_text(response) -> str:
 
 
 def _generate_response(prompt: str, app_config=None) -> str:
+    """Generate with the configured provider, then the optional fallback.
+
+    ``llm_fallback_provider`` (e.g. a free Gemini key) is only used when the
+    primary provider fails, so a local Ollama stays the default while a
+    stopped Ollama or a missing model does not ruin a long video task.
+    """
+    runtime_app_config = app_config if app_config is not None else config.app
+    response = _generate_response_once(prompt, app_config=app_config)
+    if not (isinstance(response, str) and response.startswith("Error: ")):
+        return response
+
+    primary = str(runtime_app_config.get("llm_provider", DEFAULT_LLM_PROVIDER_ID)).lower()
+    fallback = str(runtime_app_config.get("llm_fallback_provider", "") or "").strip().lower()
+    if not fallback or fallback == primary or get_llm_provider(fallback) is None:
+        return response
+
+    logger.warning(
+        f"llm provider {primary} failed ({response.removeprefix('Error: ')[:200]}), "
+        f"retrying with fallback provider {fallback}"
+    )
+    fallback_config = dict(runtime_app_config)
+    fallback_config["llm_provider"] = fallback
+    return _generate_response_once(prompt, app_config=fallback_config)
+
+
+def _generate_response_once(prompt: str, app_config=None) -> str:
     try:
         # WebUI 在视频生成期间允许用户准备下一条文案。调用方可以传入提交瞬间
         # 的配置快照，确保模型请求重试期间不会因为后台任务结束并应用新配置，

@@ -1,3 +1,4 @@
+import contextlib
 import itertools
 import io
 import math
@@ -24,6 +25,7 @@ from moviepy import (
     TextClip,
     VideoFileClip,
     afx,
+    vfx,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
 from PIL import Image, ImageDraw, ImageFont
@@ -39,8 +41,9 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
+from app.services import subtitle_styles
 from app.services.utils import video_effects
-from app.utils import file_security, utils
+from app.utils import file_security, rtl_text, utils
 
 class SubClippedVideoClip:
     def __init__(
@@ -390,6 +393,29 @@ def _get_temp_audio_dir(output_dir: str) -> str:
     return output_dir
 
 
+def _get_x264_preset() -> str:
+    """libx264 speed preset from ``[app] video_encode_preset`` ("" = FFmpeg default).
+
+    Every video is encoded three times (clip pieces, concat, final render), so
+    "veryfast" roughly halves the total time on a weak laptop CPU at a small
+    cost in file size. Only applied to libx264; hardware encoders use other
+    preset names.
+    """
+    preset = str(config.app.get("video_encode_preset", "") or "").strip().lower()
+    allowed = {
+        "ultrafast", "superfast", "veryfast", "faster", "fast",
+        "medium", "slow", "slower", "veryslow",
+    }
+    return preset if preset in allowed else ""
+
+
+def _with_x264_preset(codec: str, kwargs: dict) -> dict:
+    preset = _get_x264_preset()
+    if codec == _DEFAULT_VIDEO_CODEC and preset and "preset" not in kwargs:
+        return {**kwargs, "preset": preset}
+    return kwargs
+
+
 def _fallback_write_videofile(clip, output_file: str, failed_codec: str, reason: str, **kwargs):
     """
     硬件编码失败后用 libx264 重试，只有重试成功才禁用该硬件编码器。
@@ -398,7 +424,11 @@ def _fallback_write_videofile(clip, output_file: str, failed_codec: str, reason:
     文件被占用、目录权限、杀软拦截等通用 IO 问题。只有 libx264 能成功写出时，
     才能判断原始失败大概率来自硬件编码器本身，避免误伤后续任务。
     """
-    clip.write_videofile(output_file, codec=_DEFAULT_VIDEO_CODEC, **kwargs)
+    clip.write_videofile(
+        output_file,
+        codec=_DEFAULT_VIDEO_CODEC,
+        **_with_x264_preset(_DEFAULT_VIDEO_CODEC, kwargs),
+    )
     _disable_runtime_video_codec(failed_codec, reason)
     return _DEFAULT_VIDEO_CODEC
 
@@ -412,7 +442,11 @@ def _write_videofile_with_codec_fallback(clip, output_file: str, codec: str, **k
     """
     effective_codec = _get_effective_video_codec(codec)
     try:
-        clip.write_videofile(output_file, codec=effective_codec, **kwargs)
+        clip.write_videofile(
+            output_file,
+            codec=effective_codec,
+            **_with_x264_preset(effective_codec, kwargs),
+        )
         return effective_codec
     except Exception as exc:
         if effective_codec == _DEFAULT_VIDEO_CODEC:
@@ -508,6 +542,8 @@ def concat_video_clips_with_ffmpeg(
             "-pix_fmt",
             "yuv420p",
         ]
+        if codec == _DEFAULT_VIDEO_CODEC and _get_x264_preset():
+            command.extend(["-preset", _get_x264_preset()])
         if max_duration is not None and max_duration > 0:
             command.extend(["-t", f"{max_duration:.3f}"])
         command.append(output_file)
@@ -741,6 +777,135 @@ def _fit_clip_to_canvas(
     ).with_duration(clip.duration)
 
 
+_CROSSFADE_SECONDS = 0.6
+
+
+def _fast_clip_preparation_enabled() -> bool:
+    """``[app] fast_clip_preparation``: cut, scale and crop clips with FFmpeg.
+
+    MoviePy resizes every frame in Python, which makes the clip-combining step
+    the slowest part of a long video on a laptop CPU. FFmpeg does the same
+    cut/scale/crop/frame-rate work natively, several times faster. Off by
+    default to keep upstream behaviour; the Windows installer enables it.
+    """
+    return bool(config.app.get("fast_clip_preparation", False))
+
+
+def _prepare_segment_with_ffmpeg(
+    source_file: str,
+    start_time: float,
+    end_time: float,
+    target_width: int,
+    target_height: int,
+    fit_mode: VideoFitMode | str,
+    clip_speed: float,
+    output_file: str,
+) -> bool:
+    """Write ``source[start:end]`` already sized for the canvas. Returns success."""
+    source_duration = float(end_time) - float(start_time)
+    if source_duration <= 0:
+        return False
+    w, h = int(target_width), int(target_height)
+    if VideoFitMode(fit_mode) == VideoFitMode.cover:
+        scale = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+    else:
+        scale = (
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black"
+        )
+    filters = f"{scale},setsar=1,fps={fps},format=yuv420p"
+    if clip_speed != 1.0:
+        filters = f"setpts=PTS/{clip_speed:.6f},{filters}"
+    command = [
+        get_ffmpeg_binary(), "-y", "-loglevel", "error",
+        "-ss", f"{float(start_time):.3f}", "-t", f"{source_duration:.3f}",
+        "-i", source_file, "-an", "-vf", filters,
+        # Intermediate file: fastest preset, near-lossless quality.
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+        output_file,
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError as exc:
+        logger.warning(f"ffmpeg clip preparation unavailable: {exc}")
+        return False
+    if result.returncode != 0 or not os.path.isfile(output_file) or os.path.getsize(output_file) == 0:
+        logger.warning(
+            "ffmpeg clip preparation failed, falling back to MoviePy: "
+            f"{(result.stderr or '').strip()[-300:]}"
+        )
+        return False
+    return True
+
+
+def _crossfade_from_previous(
+    clip,
+    previous: SubClippedVideoClip,
+    clip_speed: float,
+    target_width: int,
+    target_height: int,
+    fit_mode: VideoFitMode,
+    tail_file: str = "",
+):
+    """Dissolve the end of the previous shot over the start of ``clip``.
+
+    Clips are encoded one by one and joined with FFmpeg's concat demuxer, so
+    a classic overlapping crossfade is not possible. Instead the *previous*
+    source keeps playing past its cut point for a fraction of a second and
+    fades out on top of the new clip. The timeline length is unchanged.
+    Returns the new clip and the opened source that must be closed later.
+    """
+    duration = min(_CROSSFADE_SECONDS, clip.duration / 3)
+    if tail_file and previous.end_time and _prepare_segment_with_ffmpeg(
+        previous.file_path,
+        previous.end_time,
+        previous.end_time + duration * clip_speed,
+        target_width,
+        target_height,
+        fit_mode,
+        clip_speed,
+        tail_file,
+    ):
+        try:
+            source = _open_video_clip_quietly(tail_file)
+        except Exception as exc:
+            # FFmpeg writes an empty file when the previous shot already ended
+            # at the end of its source; hold its last frame instead (below).
+            logger.debug(f"crossfade tail is empty, using a still frame: {exc}")
+            source = None
+        if source is not None and source.duration and source.duration >= duration * 0.9:
+            tail = source.with_duration(min(duration, source.duration))
+            tail = tail.with_effects([vfx.CrossFadeOut(tail.duration)]).with_start(0)
+            blended = CompositeVideoClip(
+                [clip, tail], size=(target_width, target_height), use_bgclip=True
+            ).with_duration(clip.duration)
+            return blended, source
+        if source is not None:
+            close_clip(source)
+
+    source = _open_video_clip_quietly(previous.file_path)
+    tail_start = min(previous.end_time or source.duration, source.duration)
+    tail_end = min(source.duration, tail_start + duration * clip_speed)
+    if tail_end - tail_start >= duration * clip_speed * 0.9:
+        tail = source.subclipped(tail_start, tail_end)
+        if clip_speed != 1.0:
+            tail = tail.with_speed_scaled(clip_speed)
+    else:
+        # The previous shot ended with its source file: hold its last frame.
+        tail = source.to_ImageClip(t=max(0.0, tail_start - 0.05))
+    tail = _fit_clip_to_canvas(
+        tail.with_duration(duration),
+        target_width=target_width,
+        target_height=target_height,
+        fit_mode=fit_mode,
+    ).with_duration(duration)
+    tail = tail.with_effects([vfx.CrossFadeOut(duration)]).with_start(0)
+    blended = CompositeVideoClip(
+        [clip, tail], size=(target_width, target_height), use_bgclip=True
+    ).with_duration(clip.duration)
+    return blended, source
+
+
 def combine_videos(
     combined_video_path: str,
     video_paths: List[str],
@@ -832,6 +997,7 @@ def combine_videos(
         
     logger.debug(f"total subclipped items: {len(subclipped_items)}")
     
+    previous_item = None
     # Add downloaded clips over and over until the duration of the audio (max_duration) has been reached
     for i, subclipped_item in enumerate(subclipped_items):
         if video_duration >= required_video_duration:
@@ -844,15 +1010,36 @@ def combine_videos(
             f"remaining: {required_video_duration - video_duration:.2f}s"
         )
         
+        crossfade_source = None
+        segment_file = ""
+        tail_file = ""
+        if _fast_clip_preparation_enabled():
+            segment_file = f"{output_dir}/temp-seg-{i+1}.mp4"
+            tail_file = f"{output_dir}/temp-tail-{i+1}.mp4"
+            if not _prepare_segment_with_ffmpeg(
+                subclipped_item.file_path,
+                subclipped_item.start_time,
+                subclipped_item.end_time,
+                video_width,
+                video_height,
+                fit_mode,
+                normalized_clip_speed,
+                segment_file,
+            ):
+                segment_file = ""
         try:
-            clip = _open_video_clip_quietly(subclipped_item.file_path).subclipped(
-                subclipped_item.start_time, subclipped_item.end_time
-            )
-            # 播放速度属于素材本身属性，应在转场前应用。这样 Fade/Slide 等一秒转场
-            # 不会跟随素材速度变成 0.5 秒或 2 秒；后续最大时长裁剪继续作为
-            # 浮点误差或异常素材时长的安全兜底，保证最终片段不突破配置上限。
-            if normalized_clip_speed != 1.0:
-                clip = clip.with_speed_scaled(normalized_clip_speed)
+            if segment_file:
+                # Already cut, sped up and sized for the canvas by FFmpeg.
+                clip = _open_video_clip_quietly(segment_file)
+            else:
+                clip = _open_video_clip_quietly(subclipped_item.file_path).subclipped(
+                    subclipped_item.start_time, subclipped_item.end_time
+                )
+                # 播放速度属于素材本身属性，应在转场前应用。这样 Fade/Slide 等一秒转场
+                # 不会跟随素材速度变成 0.5 秒或 2 秒；后续最大时长裁剪继续作为
+                # 浮点误差或异常素材时长的安全兜底，保证最终片段不突破配置上限。
+                if normalized_clip_speed != 1.0:
+                    clip = clip.with_speed_scaled(normalized_clip_speed)
             # Normalize every source clip before transitions are applied. In cover mode
             # the clip fills the canvas and the excess edges are cropped; contain keeps
             # the complete source frame and uses black bars for the unused area.
@@ -899,6 +1086,23 @@ def combine_videos(
                 ]
                 shuffle_transition = random.choice(transition_funcs)
                 clip = shuffle_transition(clip)
+            elif (
+                transition_value == VideoTransitionMode.crossfade.value
+                and previous_item is not None
+            ):
+                try:
+                    clip, crossfade_source = _crossfade_from_previous(
+                        clip,
+                        previous_item,
+                        normalized_clip_speed,
+                        video_width,
+                        video_height,
+                        fit_mode,
+                        tail_file=tail_file,
+                    )
+                except Exception as exc:
+                    # A failed dissolve must never cost the clip itself.
+                    logger.warning(f"crossfade skipped for clip {i+1}: {exc}")
 
             if clip.duration > max_clip_duration:
                 clip = clip.subclipped(0, max_clip_duration)
@@ -916,6 +1120,9 @@ def combine_videos(
             # Store clip duration before closing
             clip_duration_saved = clip.duration
             close_clip(clip)
+            if crossfade_source is not None:
+                close_clip(crossfade_source)
+            previous_item = subclipped_item
 
             processed_clips.append(
                 SubClippedVideoClip(
@@ -929,7 +1136,11 @@ def combine_videos(
             video_duration += clip_duration_saved
             
         except Exception as e:
+            if crossfade_source is not None:
+                close_clip(crossfade_source)
             logger.error(f"failed to process clip: {str(e)}")
+        finally:
+            delete_files([f for f in (segment_file, tail_file) if f and os.path.exists(f)])
     
     # loop processed clips until the video duration covers the audio duration and the small safety margin.
     if video_duration < required_video_duration:
@@ -984,7 +1195,13 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
     # 字幕换行必须在真正创建 TextClip 前完成，否则 MoviePy 只会按原始文本
     # 计算渲染区域。这里用 PIL 按当前字体和字号测量宽度，确保每一行都尽量
     # 控制在视频可用宽度内，避免大字号或中文长句直接溢出画面。
-    font = ImageFont.truetype(font, fontsize)
+    # RTL (Arabic) text is wrapped in logical order, measured in its shaped
+    # form with the BASIC engine, and every final line is converted to visual
+    # order. See app/utils/rtl_text.py for why raqm is not used.
+    rtl = rtl_text.contains_rtl(text)
+    font = ImageFont.truetype(
+        font, fontsize, layout_engine=ImageFont.Layout.BASIC if rtl else None
+    )
     max_width = int(max_width)
 
     # getbbox() 返回的是“当前字形的可见墨迹高度”，并不是字体行高。例如只含
@@ -1006,6 +1223,8 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
         inner_text = inner_text.strip()
         if not inner_text:
             return 0, line_height
+        if rtl:
+            inner_text = rtl_text.shape_line(inner_text)
         left, top, right, bottom = font.getbbox(inner_text)
         # bbox 仍适合测量换行所需的实际宽度；高度必须始终使用稳定字体行高。
         return right - left, line_height
@@ -1014,6 +1233,8 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
     if width <= max_width:
         # SRT 条目允许作者手工换行。即使整段文本在宽度上不需要再次折行，
         # 画布高度仍必须按现有行数计算，否则第二行及后续行会被裁掉。
+        if rtl:
+            text = rtl_text.shape_text(text)
         return text, (text.count("\n") + 1) * line_height
 
     def split_long_token(token):
@@ -1057,7 +1278,9 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
     if current:
         lines.append(current)
 
-    line_start_punctuation = "，。！？；：、,.!?;:)]}）】》」』”’"
+    line_start_punctuation = (
+        "，。！？；：、,.!?;:)]}）】》」』”’" + rtl_text.ARABIC_LINE_START_PUNCTUATION
+    )
     for index in range(1, len(lines)):
         # 中文长句按字符拆分时，最后一个句号、逗号等闭合标点可能被单独
         # 放到下一行，导致字幕背景被异常撑高，视觉上像一个小点掉在正文
@@ -1078,6 +1301,8 @@ def wrap_text(text, max_width, font="Arial", fontsize=60):
     # 高度以最终结果为准。原文本中的显式换行可能保留在某个 token 内，
     # 此时临时 lines 列表的长度不等于 MoviePy 实际渲染的行数。
     height = (result.count("\n") + 1) * line_height
+    if rtl:
+        result = rtl_text.shape_text(result)
     return result, height
 
 
@@ -1224,6 +1449,17 @@ def generate_video(
     aspect = VideoAspect(params.video_aspect)
     video_width, video_height = aspect.to_resolution()
 
+    # Work on a copy: presets and resolution scaling must not leak back into
+    # the caller's task parameters.
+    params = params.model_copy()
+    if subtitle_styles.apply_subtitle_style(params):
+        logger.info(f"  subtitle style: {params.subtitle_style}")
+    # Subtitle sizes are designed for 1080p; keep proportions at 720p.
+    subtitle_scale = min(video_width, video_height) / 1080
+    if subtitle_scale != 1:
+        params.font_size = max(12, round(float(params.font_size) * subtitle_scale))
+        params.stroke_width = float(params.stroke_width) * subtitle_scale
+
     logger.info(f"generating video: {video_width} x {video_height}")
     logger.info(f"  ① video: {video_path}")
     logger.info(f"  ② audio: {audio_path}")
@@ -1247,6 +1483,21 @@ def generate_video(
         )
         if os.name == "nt":
             font_path = font_path.replace("\\", "/")
+
+        # Arabic subtitles with a font that has no Arabic glyphs (e.g. the
+        # upstream default STHeiti) would render as empty boxes.
+        if subtitle_path and os.path.exists(subtitle_path):
+            with open(subtitle_path, encoding="utf-8", errors="ignore") as fp:
+                subtitle_text = fp.read()
+            resolved_font_path = rtl_text.resolve_font_for_text(
+                font_path, subtitle_text, utils.font_dir()
+            )
+            if resolved_font_path != font_path:
+                logger.warning(
+                    f"font {params.font_name} cannot draw Arabic text, "
+                    f"using {rtl_text.DEFAULT_ARABIC_FONT} instead"
+                )
+                font_path = resolved_font_path
 
         logger.info(f"  ⑤ font: {font_path}")
 
@@ -1458,7 +1709,14 @@ def generate_video(
             )
             text_clips = []
             for item in sub.subtitles:
-                clip = create_text_clip(subtitle_item=item)
+                # Shaped RTL lines must be drawn exactly as given (BASIC engine).
+                layout = (
+                    rtl_text.basic_layout()
+                    if rtl_text.contains_rtl(item[1])
+                    else contextlib.nullcontext()
+                )
+                with layout:
+                    clip = create_text_clip(subtitle_item=item)
                 text_clips.append(clip)
             video_clip = CompositeVideoClip([video_clip, *text_clips])
             clip_stack.callback(video_clip.close)
