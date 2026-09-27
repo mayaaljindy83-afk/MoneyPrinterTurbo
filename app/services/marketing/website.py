@@ -315,9 +315,54 @@ def build_facts(data: dict) -> tuple[list[dict], dict]:
     return texts, index
 
 
+# Keys sites commonly use to remember the chosen language (cookie / localStorage).
+LOCALE_KEYS = ("qaivo_locale", "NEXT_LOCALE", "locale", "lang", "language", "i18nextLng")
+
+_SET_LOCALE_JS = """
+(locale) => { for (const key of %s) { try { localStorage.setItem(key, locale); } catch (e) {} } }
+""" % json.dumps(list(LOCALE_KEYS))
+
+
+def _prepare_context(context, url: str, locale: str, offline: bool) -> None:
+    """Ask the site for ``locale`` (cookies + localStorage) and, offline, block every other host."""
+    if locale:
+        host = urllib.parse.urlparse(url).hostname or ""
+        context.add_cookies([{"name": key, "value": locale, "domain": host, "path": "/"} for key in LOCALE_KEYS])
+        context.add_init_script(f"({_SET_LOCALE_JS})({json.dumps(locale)})")
+    if offline:
+        origin = urllib.parse.urlparse(url).netloc
+
+        def only_local(route):
+            if urllib.parse.urlparse(route.request.url).netloc == origin:
+                route.continue_()
+            else:
+                route.abort()
+
+        context.route("**/*", only_local)
+
+
+def _switch_language(page, locale: str) -> None:
+    """If the page is still in another language, use its own language menu (a <select>)."""
+    if not locale or (page.evaluate("document.documentElement.lang") or "").lower().startswith(locale):
+        return
+    for select in page.query_selector_all("select"):
+        values = page.evaluate("s => [...s.options].map(o => o.value)", select)
+        if locale in values:
+            try:
+                select.select_option(locale)
+                page.wait_for_timeout(1500)
+            except Exception as exc:
+                logger.warning(f"language switch failed: {exc}")
+            return
+
+
 def read_website(url: str, out_dir: str | None = None, portrait: bool = True, timeout_ms: int = 45000,
-                 check_robots: bool = True) -> dict:
-    """Open the page, extract grounded facts and real screenshots, save ``website.json``."""
+                 check_robots: bool = True, locale: str = "", offline: bool = False) -> dict:
+    """Open the page, extract grounded facts and real screenshots, save ``website.json``.
+
+    ``locale``: "ar"/"en"... ask the site for that language. ``offline``: block requests to any
+    other host (used for a local copy of the site).
+    """
     url = normalize_url(url)
     if check_robots and not robots_allowed(url):
         raise WebsiteError("This website's robots.txt does not allow automated reading of this page.")
@@ -339,6 +384,7 @@ def read_website(url: str, out_dir: str | None = None, portrait: bool = True, ti
         try:
             context = browser.new_context(viewport=DESKTOP, user_agent=USER_AGENT, accept_downloads=False,
                                           service_workers="block")
+            _prepare_context(context, url, locale, offline)
             page = context.new_page()
             try:
                 response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
@@ -350,6 +396,7 @@ def read_website(url: str, out_dir: str | None = None, portrait: bool = True, ti
                 raise WebsiteError(f"Could not open the page: {str(exc).splitlines()[0]}") from exc
             if response is not None and response.status >= 400:
                 raise WebsiteError(f"The page answered with HTTP {response.status}.")
+            _switch_language(page, locale)
             _scroll_through(page)
             data = page.evaluate(_EXTRACT_JS)
             if data["hasPassword"] and data["bodyText"] < 600:
@@ -380,6 +427,7 @@ def read_website(url: str, out_dir: str | None = None, portrait: bool = True, ti
             if portrait:
                 mobile = browser.new_context(viewport=MOBILE, user_agent=USER_AGENT, accept_downloads=False,
                                              is_mobile=True, has_touch=True, service_workers="block")
+                _prepare_context(mobile, url, locale, offline)
                 mobile_page = mobile.new_page()
                 try:
                     mobile_page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
@@ -387,6 +435,7 @@ def read_website(url: str, out_dir: str | None = None, portrait: bool = True, ti
                         mobile_page.wait_for_load_state("networkidle", timeout=10000)
                     except PlaywrightError:
                         pass
+                    _switch_language(mobile_page, locale)
                     mobile_page.screenshot(path=os.path.join(shots_dir, "mobile.png"))
                     screenshots.append({"id": "mobile", "kind": "mobile", "path": "screenshots/mobile.png",
                                         "text": data["title"], **MOBILE})

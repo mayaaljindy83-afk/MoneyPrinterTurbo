@@ -79,20 +79,34 @@ def list_projects() -> list[str]:
 
 
 def analyze(url: str, language: str, duration: float, platform: str, goal: str, presenter: str = "",
-            aspect: str = "", focus: str = "", generate=None, read=None) -> dict:
-    """Read the page, write the ad plan, save the project. ``read``/``generate`` are for tests."""
-    url = website.normalize_url(url)
+            aspect: str = "", focus: str = "", generate=None, read=None, source_folder: str = "",
+            route: str = "/") -> dict:
+    """Read the page, write the ad plan, save the project. ``read``/``generate`` are for tests.
+
+    ``source_folder``: read the page ``route`` from the website's project folder on this laptop
+    instead of the internet (``url`` is then only the public address shown in the ad).
+    """
+    code = director.language_code(language)
+    if source_folder:
+        from app.services.marketing import website_source
+
+        public = url.strip()
+        url = website.normalize_url(public).rstrip("/") + route if public else "http://local" + route
+        read = read or website_source.reader(source_folder, route, public)
+    else:
+        url = website.normalize_url(url)
     host = re.sub(r"[^a-z0-9]+", "-", urllib.parse.urlparse(url).netloc.lower()).strip("-")
     project_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{host}"[:60]
     folder = project_dir(project_id)
     site_dir = os.path.join(folder, "website")
-    site = (read or website.read_website)(url, site_dir)
+    site = (read or website.read_website)(url, site_dir, locale=code)
     plan = director.direct(site, language, duration, platform, goal, focus, generate=generate)
     project = {
         "project_id": project_id, "created": time.time(), "url": url,
         "language": director.language_code(language), "duration": float(duration), "platform": platform,
         "goal": goal, "presenter": presenter or profiles.default_presenter(),
         "aspect": aspect or director.platform_aspect(platform), "focus": focus,
+        "source": {"folder": source_folder, "route": route} if source_folder else {},
         "website_dir": site_dir, "plan": plan, "jobs": {},
     }
     save_project(project)

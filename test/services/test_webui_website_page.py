@@ -12,6 +12,7 @@ from app.services import llm
 from app.services.marketing import pipeline, website
 from app.services.presenter import profiles, studio
 
+REAL_READ = website.read_website
 PAGE = os.path.join(os.path.dirname(__file__), "..", "..", "webui", "pages", "2_AI_Website_Video.py")
 
 SITE = {
@@ -46,7 +47,8 @@ class TestWebsitePage(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.patches = [
             mock.patch.dict(os.environ, {"MPT_STORAGE_DIR": self.tmp}),
-            mock.patch.dict(config.app, {"presenters_dir": "", "kaggle_api_token": "", "default_presenter": ""}),
+            mock.patch.dict(config.app, {"presenters_dir": "", "kaggle_api_token": "", "default_presenter": "",
+                                         "website_source_folder": "", "website_public_url": ""}),
             mock.patch.object(config, "save_config"),
             mock.patch.object(llm, "_generate_response", side_effect=RuntimeError("no llm here")),
             mock.patch.object(website, "read_website", fake_read),
@@ -57,6 +59,8 @@ class TestWebsitePage(unittest.TestCase):
     def tearDown(self):
         for patch in reversed(self.patches):
             patch.stop()
+
+    real_read = staticmethod(REAL_READ)
 
     def _presenter(self):
         src = os.path.join(self.tmp, "p.png")
@@ -102,6 +106,26 @@ class TestWebsitePage(unittest.TestCase):
             app = self._app()
         self.assertTrue(any(b.label.startswith("كمّلي") and not b.disabled for b in app.button))
         self.assertTrue(any("sending the job to Kaggle" in c.value for c in app.code))
+
+    def test_local_source_mode(self):
+        from test.services.test_marketing_website_source import make_project
+
+        self._presenter()
+        project_dir = os.path.join(self.tmp, "qai-vo-launch")
+        make_project(project_dir)
+        app = self._app()
+        app.radio(key="web_source_mode").set_value("كود الموقع على اللابتوب").run()
+        app.text_input[0].set_value(project_dir).run()
+        self.assertTrue(any("2 صفحة عامة" in c.value for c in app.caption))
+        self.assertEqual(app.selectbox[0].value, "/products/academic")
+        app.text_input[1].set_value("https://qai-vo.com")
+        with mock.patch.object(website, "read_website", self.real_read):
+            next(b for b in app.button if b.label == "حلّلي الموقع").click().run()
+        self.assertFalse(app.exception, app.exception)
+        project = pipeline.load_project(pipeline.list_projects()[0])
+        self.assertEqual(project["source"], {"folder": project_dir, "route": "/products/academic"})
+        self.assertEqual(project["url"], "https://qai-vo.com/products/academic")
+        self.assertEqual(config.app["website_source_folder"], project_dir)
 
 
 if __name__ == "__main__":

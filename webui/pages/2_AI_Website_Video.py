@@ -10,8 +10,9 @@ root_dir = str(Path(__file__).resolve().parents[2])
 if root_dir not in sys.path:
     sys.path.append(root_dir)
 
+from app.config import config  # noqa: E402
 from app.services import subtitle_styles  # noqa: E402
-from app.services.marketing import director, pipeline, website  # noqa: E402
+from app.services.marketing import director, pipeline, website, website_source  # noqa: E402
 from app.services.presenter import kaggle_agent, profiles, studio  # noqa: E402
 
 st.set_page_config(page_title="AI Website Video", page_icon="🎬", layout="wide")
@@ -23,6 +24,17 @@ TEXT = {
               "حطّي رابط صفحة الخدمة. الذكاء الاصطناعي بيقرأها وبيكتب إعلان، والمقدّمة تبعك بتقدّمه جوّا عالم "
               "شبه ثلاثي الأبعاد معمول من الموقع الحقيقي. الشغل التقيل ببلاش على Kaggle."),
     "url": ("Website / service URL", "رابط الموقع أو صفحة الخدمة"),
+    "source_mode": ("Website source", "مصدر الموقع"),
+    "mode_url": ("URL", "رابط"),
+    "mode_local": ("Local source code", "كود الموقع على اللابتوب"),
+    "folder": ("Website project folder", "مجلد مشروع الموقع"),
+    "folder_help": ("The folder of the website project on this laptop, built once (npm run build). Nothing is "
+                    "uploaded and no project command is run.",
+                    "مجلد مشروع الموقع عاللابتوب، بعد ما يكون مبني مرة (npm run build). ما بينرفع شي، "
+                    "وما بيشتغل ولا أمر من المشروع."),
+    "page": ("Page (service)", "الصفحة (الخدمة)"),
+    "public_url": ("Public website address (shown in the ad)", "عنوان الموقع الحقيقي (بيطلع بالإعلان)"),
+    "found_pages": ("public pages found", "صفحة عامة لقيناها"),
     "language": ("Language", "اللغة"),
     "duration": ("Duration (seconds)", "المدة (بالثواني)"),
     "platform": ("Platform", "المنصة"),
@@ -82,8 +94,28 @@ presenters = profiles.list_presenters()
 token = kaggle_agent.configured_token()
 
 # ----------------------------------------------------------------------------- inputs
+mode = st.radio(t("source_mode"), [t("mode_url"), t("mode_local")], horizontal=True, key="web_source_mode")
+local = mode == t("mode_local")
+routes, folder = [], ""
+if local:
+    folder = st.text_input(t("folder"), value=str(config.app.get("website_source_folder", "") or ""),
+                           placeholder=r"C:\Projects\qai-vo-launch", help=t("folder_help"))
+    if folder.strip():
+        try:
+            routes = website_source.discover(folder.strip())["routes"]
+            st.caption(f"{len(routes)} {t('found_pages')}")
+        except website.WebsiteError as exc:
+            st.error(str(exc))
+
 with st.form("analyze_form"):
-    url = st.text_input(t("url"), placeholder="https://qai-vo.com/products/academic")
+    if local:
+        route = st.selectbox(t("page"), routes or ["/"],
+                             index=routes.index("/products/academic") if "/products/academic" in routes else 0)
+        url = st.text_input(t("public_url"), value=str(config.app.get("website_public_url", "") or ""),
+                            placeholder="https://qai-vo.com")
+    else:
+        route = "/"
+        url = st.text_input(t("url"), placeholder="https://qai-vo.com/products/academic")
     col1, col2, col3, col4 = st.columns(4)
     language = col1.selectbox(t("language"), ["Arabic", "English"])
     duration = col2.slider(t("duration"), 10, 90, 45, 5)
@@ -95,19 +127,25 @@ with st.form("analyze_form"):
                                index=presenters.index(default_presenter) if default_presenter in presenters else 0)
     aspect = col6.selectbox(t("aspect"), [t("auto"), "16:9", "9:16"])
     focus = col7.text_input(t("focus"))
-    submitted = st.form_submit_button(t("analyze"), type="primary", disabled=not presenters)
+    submitted = st.form_submit_button(t("analyze"), type="primary",
+                                      disabled=not presenters or (local and not routes))
 if not presenters:
     st.info(t("no_presenter"))
 elif presenter != default_presenter and st.button(t("make_default")):
     profiles.set_default_presenter(presenter)
     st.rerun()
 
-if submitted and url.strip():
+if submitted and (url.strip() or local):
+    if local and (folder.strip() != config.app.get("website_source_folder")
+                  or url.strip() != config.app.get("website_public_url")):
+        config.app["website_source_folder"] = folder.strip()  # remembered, stays in config.toml only
+        config.app["website_public_url"] = url.strip()
+        config.save_config()
     with st.spinner("..."):
         try:
             project = pipeline.analyze(url, language, duration, platform.lower(), goal.lower(),
                                        presenter=presenter, aspect="" if aspect == t("auto") else aspect,
-                                       focus=focus)
+                                       focus=focus, source_folder=folder.strip() if local else "", route=route)
             st.session_state["web_project"] = project["project_id"]
         except website.WebsiteError as exc:
             st.error(str(exc))
