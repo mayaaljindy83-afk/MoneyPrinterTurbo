@@ -24,6 +24,7 @@ DEFAULT_DESCRIPTION = (
     "wearing a fitted navy blazer over a white blouse, smart formal-youthful style"
 )
 DEFAULT_VOICE = "ar-SA-ZariyahNeural-Female"
+DEFAULT_VOICE_EN = "en-US-JennyNeural-Female"
 
 
 @dataclass
@@ -32,6 +33,7 @@ class Presenter:
     description: str = DEFAULT_DESCRIPTION
     voice_name: str = DEFAULT_VOICE
     voice_rate: float = 1.0
+    voice_name_en: str = DEFAULT_VOICE_EN  # the same presenter speaking English
     folder: str = ""
     reference_images: list[str] = field(default_factory=list)
 
@@ -71,7 +73,7 @@ def load_presenter(name: str) -> Presenter:
     folder = os.path.join(presenters_root(), safe_name(name))
     with open(os.path.join(folder, "profile.json"), encoding="utf-8") as fp:
         data = json.load(fp)
-    known = {k: data[k] for k in ("name", "description", "voice_name", "voice_rate") if k in data}
+    known = {k: data[k] for k in ("name", "description", "voice_name", "voice_rate", "voice_name_en") if k in data}
     presenter = Presenter(**known)
     presenter.folder = folder
     presenter.reference_images = _references(folder)
@@ -92,6 +94,27 @@ def save_presenter(presenter: Presenter, images: list[str] | None = None) -> Pre
     with open(os.path.join(folder, "profile.json"), "w", encoding="utf-8") as fp:
         json.dump(presenter.to_json(), fp, ensure_ascii=False, indent=2)
     return load_presenter(presenter.name)
+
+
+def voice_for(presenter: Presenter, language: str) -> str:
+    """The presenter's voice for a video language (Arabic voice by default)."""
+    if str(language or "").lower().startswith("en"):
+        return presenter.voice_name_en or DEFAULT_VOICE_EN
+    return presenter.voice_name
+
+
+def default_presenter() -> str:
+    """The brand presenter used for every video (``[app] default_presenter``), else the first one."""
+    names = list_presenters()
+    chosen = str(config.app.get("default_presenter", "") or "")
+    if chosen in names:
+        return chosen
+    return names[0] if names else ""
+
+
+def set_default_presenter(name: str) -> None:
+    config.app["default_presenter"] = safe_name(name)
+    config.save_config()
 
 
 def delete_presenter(name: str) -> None:

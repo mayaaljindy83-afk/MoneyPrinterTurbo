@@ -146,6 +146,8 @@ def update_shots(job_id: str, shots: list[dict]) -> dict:
 def prepare_package(job_id: str, tts=None) -> str:
     plan = job_package.load_plan(job_id)
     presenter = profiles.load_presenter(plan["presenter"])
+    if plan.get("kind") == "marketing":
+        presenter.voice_name = profiles.voice_for(presenter, plan.get("language", ""))
     places = {p["name"]: p for p in plan.get("places", [])}
     set_status(job_id, "preparing", "recording the narration")
     folder = job_package.build_package(
@@ -220,6 +222,10 @@ def default_params(plan: dict, options: dict | None = None) -> VideoParams:
 
 def render_final(job_id: str, options: dict | None = None) -> str:
     plan = job_package.load_plan(job_id)
+    if plan.get("kind") == "marketing":  # website ad: composited scenes
+        from app.services.marketing import pipeline
+
+        return pipeline.render(job_id, options)
     set_status(job_id, "assembling", "assembling the final video")
     final = assemble.assemble(job_id, default_params(plan, options),
                               progress=lambda p: set_status(job_id, progress=0.9 + p * 0.1))
