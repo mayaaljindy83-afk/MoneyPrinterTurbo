@@ -92,6 +92,24 @@ class TestJobValidation(unittest.TestCase):
             job = pw.load_job(tmp)
             self.assertEqual(job["_root"], os.path.join(tmp, "pkg"))
 
+    def test_load_job_from_uploaded_zip(self):
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "input", "datasets", "maya", "mpt-job-x"))
+            with zipfile.ZipFile(os.path.join(tmp, "input", "datasets", "maya", "mpt-job-x", "package.zip"),
+                                 "w") as zf:
+                zf.writestr("job.json", json.dumps(self._job()))
+                zf.writestr("presenter/ref1.png", b"png")
+            job = pw.load_job(os.path.join(tmp, "input"), os.path.join(tmp, "work"))
+            self.assertEqual(job["_root"], os.path.join(tmp, "work", "job"))
+            self.assertTrue(os.path.isfile(os.path.join(job["_root"], "presenter", "ref1.png")))
+
+    def test_local_shots_are_not_rendered_in_the_cloud(self):
+        job = self._job(shots=[{"id": "a", "type": "TALK", "duration": 2, "audio": "x"},
+                               {"id": "b", "type": "BROLL", "duration": 2, "local": True}])
+        self.assertEqual([s["id"] for s in pw.cloud_shots(job)], ["a"])
+
 
 class TestWorkflows(unittest.TestCase):
     def test_talk_chain_trims_overlap_and_batches(self):

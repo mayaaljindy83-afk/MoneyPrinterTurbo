@@ -151,17 +151,35 @@ def run(command: list[str], cwd: str | None = None) -> None:
 
 
 # --------------------------------------------------------------------------- job
-def load_job(job_dir: str) -> dict:
-    """Find job.json (the dataset may nest it one level deeper)."""
-    candidates = [os.path.join(job_dir, "job.json")] + sorted(glob.glob(os.path.join(job_dir, "*", "job.json")))
-    for path in candidates:
-        if os.path.isfile(path):
-            with open(path, encoding="utf-8") as fp:
-                job = json.load(fp)
-            job["_root"] = os.path.dirname(path)
-            validate_job(job)
-            return job
-    raise SystemExit(f"job.json not found in {job_dir}")
+def find_job_json(search_dir: str, extract_dir: str) -> str:
+    """job.json anywhere under ``search_dir``, or inside an uploaded ``package.zip``."""
+    direct = os.path.join(search_dir, "job.json")
+    if os.path.isfile(direct):
+        return direct
+    found = sorted(glob.glob(os.path.join(search_dir, "**", "job.json"), recursive=True), key=len)
+    if found:
+        return found[0]
+    import zipfile
+
+    for archive in sorted(glob.glob(os.path.join(search_dir, "**", "*.zip"), recursive=True)):
+        with zipfile.ZipFile(archive) as zf:
+            if "job.json" in zf.namelist():
+                target = os.path.join(extract_dir, "job")
+                zf.extractall(target)
+                return os.path.join(target, "job.json")
+    return ""
+
+
+def load_job(job_dir: str, extract_dir: str | None = None) -> dict:
+    """Load and check job.json from a folder (searched recursively) or a zip in it."""
+    path = find_job_json(job_dir, extract_dir or job_dir)
+    if not path:
+        raise SystemExit(f"job.json not found in {job_dir}")
+    with open(path, encoding="utf-8") as fp:
+        job = json.load(fp)
+    job["_root"] = os.path.dirname(path)
+    validate_job(job)
+    return job
 
 
 def validate_job(job: dict) -> None:
@@ -185,9 +203,14 @@ def validate_job(job: dict) -> None:
         if float(shot.get("duration", 0)) <= 0:
             raise SystemExit(f"shot {shot['id']}: duration must be positive")
     if not (job.get("presenter") or {}).get("reference_images"):
-        needs_presenter = any(s["type"] != "BROLL" for s in shots)
+        needs_presenter = any(s["type"] != "BROLL" for s in shots if not s.get("local"))
         if needs_presenter:
             raise SystemExit("presenter.reference_images is required")
+
+
+def cloud_shots(job: dict) -> list[dict]:
+    """Shots rendered here; ``local`` shots (e.g. website screenshots) are made on the laptop."""
+    return [s for s in job.get("shots", []) if not s.get("local")]
 
 
 def video_size(job: dict) -> tuple[int, int]:
@@ -348,6 +371,10 @@ def placement_prompt(shot: dict, presenter: dict, has_location_photo: bool) -> s
     camera = shot.get("camera") or "medium shot"
     keep = ("Keep her face, hairstyle, skin tone and outfit exactly the same as in the reference image. "
             "Photorealistic, natural light, sharp focus, realistic proportions.")
+    if has_location_photo and shot.get("screen"):
+        return (f"Show the person from image 2 ({look}) in a bright modern presentation room, standing next to "
+                f"a large wall screen that displays the website from image 1. She is {action}. {camera}. "
+                f"Keep the website on the screen unchanged and readable. {keep}")
     if has_location_photo:
         return (f"Place the person from image 2 ({look}) into the scene of image 1. She is {action}. "
                 f"{camera}. Keep the place in image 1 unchanged. {keep}")
@@ -670,7 +697,7 @@ class Worker:
         return os.path.join(self.out, "frames", f"{shot['id']}.png")
 
     def pending(self) -> list[dict]:
-        return [s for s in self.job["shots"] if not os.path.isfile(self.shot_path(s))]
+        return [s for s in cloud_shots(self.job) if not os.path.isfile(self.shot_path(s))]
 
     # -- stage A: first frames ------------------------------------------------
     def make_frames(self) -> None:
@@ -821,7 +848,7 @@ class Worker:
 
 
 def summarize(worker: Worker) -> dict:
-    shots = worker.job.get("shots", [])
+    shots = cloud_shots(worker.job)
     done = [s for s in shots if os.path.isfile(worker.shot_path(s))]
     summary = {"job_id": worker.job.get("job_id"), "total": len(shots), "done": len(done),
                "remaining": [s["id"] for s in shots if s not in done],
@@ -850,10 +877,11 @@ def main(argv=None) -> int:
 
     os.makedirs(args.out, exist_ok=True)
     log = Log(os.path.join(args.out, "worker.log"))
-    job_dir = args.job or next((os.path.dirname(p) for p in sorted(glob.glob("/kaggle/input/**/job.json", recursive=True))), "")
+    job_dir = args.job or ("/kaggle/input" if platform == "kaggle" else "")
     if not job_dir:
         raise SystemExit("No job found. Attach the job dataset or pass --job.")
-    job = load_job(job_dir)
+    job = load_job(job_dir, args.work)
+    args.cache.append(job["_root"])  # package/previous holds finished shots of an earlier run
     log(f"platform={platform} job={job.get('job_id')} kind={job.get('kind', 'video')}")
 
     if not args.skip_setup:

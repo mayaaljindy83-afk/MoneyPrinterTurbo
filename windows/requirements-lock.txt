@@ -39,6 +39,8 @@ av==17.0.0
     # via faster-whisper
 azure-cognitiveservices-speech==1.41.1
     # via moneyprinterturbo
+bleach==6.4.0
+    # via kaggle
 blinker==1.9.0
     # via streamlit
 cachetools==5.5.2
@@ -82,6 +84,8 @@ fastapi==0.136.3
     # via moneyprinterturbo
 faster-whisper==1.1.0
     # via moneyprinterturbo
+fastjsonschema==2.22.2
+    # via nbformat
 fastuuid==0.14.0
     # via litellm
 filelock==3.25.2
@@ -147,16 +151,30 @@ jsonschema==4.23.0
     # via
     #   altair
     #   litellm
+    #   nbformat
 jsonschema-specifications==2025.9.1
     # via jsonschema
+jupyter-core==5.9.1
+    # via nbformat
+jupytext==1.19.5
+    # via kaggle
+kaggle==2.2.4
+    # via moneyprinterturbo
+kagglesdk==0.1.37
+    # via kaggle
 litellm==1.86.2
     # via moneyprinterturbo
 loguru==0.7.3
     # via moneyprinterturbo
 markdown-it-py==4.0.0
-    # via rich
+    # via
+    #   jupytext
+    #   mdit-py-plugins
+    #   rich
 markupsafe==3.0.3
     # via jinja2
+mdit-py-plugins==0.6.1
+    # via jupytext
 mdurl==0.1.2
     # via markdown-it-py
 moviepy==2.2.1
@@ -169,6 +187,8 @@ multidict==6.7.1
     #   yarl
 narwhals==2.18.1
     # via altair
+nbformat==5.11.1
+    # via jupytext
 numpy==2.4.4
     # via
     #   ctranslate2
@@ -188,6 +208,8 @@ packaging==24.2
     # via
     #   altair
     #   huggingface-hub
+    #   jupytext
+    #   kaggle
     #   moneyprinterturbo
     #   onnxruntime
     #   streamlit
@@ -198,6 +220,8 @@ pillow==11.3.0
     #   imageio
     #   moviepy
     #   streamlit
+platformdirs==4.12.0
+    # via jupyter-core
 proglog==0.1.12
     # via moviepy
 propcache==0.4.1
@@ -206,6 +230,8 @@ propcache==0.4.1
     #   yarl
 protobuf==5.29.6
     # via
+    #   kaggle
+    #   kagglesdk
     #   onnxruntime
     #   streamlit
 pyarrow==23.0.1
@@ -233,21 +259,27 @@ pygments==2.20.0
 python-bidi==0.6.11
     # via moneyprinterturbo
 python-dateutil==2.9.0.post0
-    # via pandas
+    # via
+    #   kaggle
+    #   pandas
 python-dotenv==1.2.2
     # via
+    #   kaggle
     #   litellm
     #   moviepy
 python-multipart==0.0.27
     # via
     #   moneyprinterturbo
     #   streamlit
+python-slugify==9.1.1
+    # via kaggle
 pytz==2026.1.post1
     # via pandas
 pyyaml==6.0.3
     # via
     #   ctranslate2
     #   huggingface-hub
+    #   jupytext
     #   moneyprinterturbo
 redis==5.2.0
     # via moneyprinterturbo
@@ -262,6 +294,8 @@ requests==2.33.1
     #   dashscope
     #   google-auth
     #   google-genai
+    #   kaggle
+    #   kagglesdk
     #   moneyprinterturbo
     #   streamlit
     #   tiktoken
@@ -303,6 +337,8 @@ tenacity==9.1.4
     # via
     #   google-genai
     #   streamlit
+text-unidecode==1.3
+    # via python-slugify
 tiktoken==0.12.0
     # via litellm
 tokenizers==0.22.2
@@ -315,8 +351,13 @@ tqdm==4.67.3
     # via
     #   faster-whisper
     #   huggingface-hub
+    #   kaggle
     #   openai
     #   proglog
+traitlets==5.16.1
+    # via
+    #   jupyter-core
+    #   nbformat
 typer==0.26.5
     # via huggingface-hub
 typing-extensions==4.15.0
@@ -343,13 +384,17 @@ typing-inspection==0.4.2
 tzdata==2025.3
     # via pandas
 urllib3==2.7.0
-    # via requests
+    # via
+    #   kaggle
+    #   requests
 uvicorn==0.32.1
     # via
     #   moneyprinterturbo
     #   streamlit
 watchdog==6.0.0 ; sys_platform != 'darwin'
     # via streamlit
+webencodings==0.6.1
+    # via bleach
 websocket-client==1.9.0
     # via dashscope
 websockets==16.0
