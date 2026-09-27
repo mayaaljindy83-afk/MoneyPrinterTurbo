@@ -594,6 +594,10 @@
     "Create Prompts Needs Script": "Write or generate the video script first.",
     "Creating Prompts": "Writing one AI scene prompt per paragraph...",
     "Kaggle Prompts Help": "Paste these lines into the PROMPTS cell of the Kaggle notebook (one clip per line).",
-    "Download prompts.txt": "Download prompts.txt"
+    "Download prompts.txt": "Download prompts.txt",
+    "Show Logo Watermark": "Show logo on video",
+    "Show Logo Watermark Help": "Shows logo.png from this folder in the top corner of the whole video: {folder}",
+    "Add Website Screenshots": "Add website screenshots",
+    "Add Website Screenshots Help": "Mixes images from the \"screenshots\" subfolder of {folder} into the video (names with \"mobile\" are used for vertical videos)."
   }
 }

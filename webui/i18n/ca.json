@@ -442,6 +442,10 @@
     "Create Prompts Needs Script": "Primer escriu o genera el guió del vídeo.",
     "Creating Prompts": "S'escriu una indicació d'escena d'IA per paràgraf...",
     "Kaggle Prompts Help": "Enganxa aquestes línies a la cel·la PROMPTS del quadern de Kaggle (un clip per línia).",
-    "Download prompts.txt": "Baixa prompts.txt"
+    "Download prompts.txt": "Baixa prompts.txt",
+    "Show Logo Watermark": "Mostra el logotip al vídeo",
+    "Show Logo Watermark Help": "Mostra logo.png d'aquesta carpeta a la cantonada superior de tot el vídeo: {folder}",
+    "Add Website Screenshots": "Afegeix captures del lloc web",
+    "Add Website Screenshots Help": "Barreja al vídeo les imatges de la subcarpeta \"screenshots\" de {folder} (les que contenen \"mobile\" al nom es fan servir per a vídeos verticals)."
   }
 }

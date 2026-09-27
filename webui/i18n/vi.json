@@ -442,6 +442,10 @@
     "Create Prompts Needs Script": "Hãy viết hoặc tạo kịch bản video trước.",
     "Creating Prompts": "Đang viết một prompt cảnh AI cho mỗi đoạn...",
     "Kaggle Prompts Help": "Dán các dòng này vào ô PROMPTS của notebook Kaggle (mỗi dòng một clip).",
-    "Download prompts.txt": "Tải prompts.txt"
+    "Download prompts.txt": "Tải prompts.txt",
+    "Show Logo Watermark": "Hiện logo trên video",
+    "Show Logo Watermark Help": "Hiện logo.png trong thư mục này ở góc trên suốt video: {folder}",
+    "Add Website Screenshots": "Thêm ảnh chụp màn hình website",
+    "Add Website Screenshots Help": "Chèn ảnh từ thư mục con \"screenshots\" của {folder} vào video (tên có \"mobile\" dùng cho video dọc)."
   }
 }

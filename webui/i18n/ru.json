@@ -442,6 +442,10 @@
     "Create Prompts Needs Script": "Сначала напишите или сгенерируйте сценарий видео.",
     "Creating Prompts": "Пишем по одному промпту сцены для каждого абзаца...",
     "Kaggle Prompts Help": "Вставьте эти строки в ячейку PROMPTS блокнота Kaggle (одна строка — один клип).",
-    "Download prompts.txt": "Скачать prompts.txt"
+    "Download prompts.txt": "Скачать prompts.txt",
+    "Show Logo Watermark": "Показывать логотип в видео",
+    "Show Logo Watermark Help": "Показывает logo.png из этой папки в верхнем углу всего видео: {folder}",
+    "Add Website Screenshots": "Добавить скриншоты сайта",
+    "Add Website Screenshots Help": "Добавляет в видео изображения из подпапки \"screenshots\" в {folder} (файлы с \"mobile\" в имени — для вертикальных видео)."
   }
 }

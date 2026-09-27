@@ -5322,6 +5322,28 @@ def _render_video_settings(panel, params):
             )
             _set_runtime_config("ui", "add_intro_outro", params.add_intro_outro)
 
+            st.session_state.setdefault(
+                "add_logo_watermark_checkbox",
+                bool(config.ui.get("add_logo_watermark", False)),
+            )
+            params.add_logo_watermark = st.checkbox(
+                tr("Show Logo Watermark"),
+                key="add_logo_watermark_checkbox",
+                help=tr("Show Logo Watermark Help").format(folder=branding.branding_dir()),
+            )
+            _set_runtime_config("ui", "add_logo_watermark", params.add_logo_watermark)
+
+            st.session_state.setdefault(
+                "add_site_screenshots_checkbox",
+                bool(config.ui.get("add_site_screenshots", False)),
+            )
+            params.add_site_screenshots = st.checkbox(
+                tr("Add Website Screenshots"),
+                key="add_site_screenshots_checkbox",
+                help=tr("Add Website Screenshots Help").format(folder=branding.branding_dir()),
+            )
+            _set_runtime_config("ui", "add_site_screenshots", params.add_site_screenshots)
+
             _render_ai_clips_settings(params)
 
             video_aspect_ratios = [

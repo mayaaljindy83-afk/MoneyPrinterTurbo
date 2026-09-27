@@ -442,6 +442,10 @@
     "Create Prompts Needs Script": "Primeiro escreva ou gere o roteiro do vídeo.",
     "Creating Prompts": "Escrevendo um prompt de cena de IA por parágrafo...",
     "Kaggle Prompts Help": "Cole estas linhas na célula PROMPTS do notebook do Kaggle (um clipe por linha).",
-    "Download prompts.txt": "Baixar prompts.txt"
+    "Download prompts.txt": "Baixar prompts.txt",
+    "Show Logo Watermark": "Mostrar logotipo no vídeo",
+    "Show Logo Watermark Help": "Mostra logo.png desta pasta no canto superior durante todo o vídeo: {folder}",
+    "Add Website Screenshots": "Adicionar capturas do site",
+    "Add Website Screenshots Help": "Mistura no vídeo as imagens da subpasta \"screenshots\" de {folder} (as com \"mobile\" no nome são usadas em vídeos verticais)."
   }
 }

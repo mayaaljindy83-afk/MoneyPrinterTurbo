@@ -53,6 +53,13 @@ video_encode_preset = ""
 # when "intro/outro" is enabled for a video. Empty = <storage_dir>/branding.
 branding_dir = ""
 
+# AI presenter videos (rendered on Kaggle's free GPU).
+# Kaggle API token: kaggle.com -> Settings -> API -> "Generate New Token".
+# Keep it only in your local config.toml (git-ignored), never commit it.
+kaggle_api_token = ""
+# Folder with presenter profiles. Empty = <storage_dir>/presenters.
+presenters_dir = ""
+
 # -----------------------------------------------------------------------------
 # General / 通用设置
 # -----------------------------------------------------------------------------

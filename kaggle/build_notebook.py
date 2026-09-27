@@ -191,8 +191,97 @@ def build_colab() -> dict:
     }
 
 
+PRESENTER_SCRIPT = os.path.join(HERE, "presenter_worker.py")
+PRESENTER_COLAB_NOTEBOOK = os.path.join(HERE, "presenter_colab.ipynb")
+PRESENTER_COLAB_URL = (
+    "https://colab.research.google.com/github/mayaaljindy83-afk/MoneyPrinterTurbo/"
+    "blob/main/kaggle/presenter_colab.ipynb"
+)
+
+PRESENTER_INTRO = """
+# 🎤 فيديو مع مقدّمة: التشغيل على Google Colab (البديل)
+
+الطريقة الأساسية هي زر **Render on Kaggle** بصفحة **Presenter video** بالبرنامج، وهي أوتوماتيكية بالكامل.
+استعملي هاد الدفتر بس إذا Kaggle مش متاح.
+
+**الخطوات:**
+1. بالبرنامج، بصفحة **Presenter video**، افتحي **Backup: run on Google Colab** ونزّلي **package.zip**.
+2. هون، من القائمة: **Runtime** ← **Change runtime type** ← **T4 GPU** ← **Save**.
+3. **Runtime** ← **Run all**. لما يطلب منك، اختاري ملف `package.zip`.
+4. بالآخر بينزل `results.zip`. رجعي عالبرنامج واختاري **Import results**.
+
+⚠️ **بصراحة:** رام Colab المجاني (حوالي 12GB) أقل من Kaggle (حوالي 29GB)، والنماذج هون كبيرة (14B).
+ممكن تنجح، وممكن الجلسة توقف بنص الشغل. إذا وقفت، رجعي شغّلي **Run all**: اللقطات اللي خلصت محفوظة على Google Drive وما بتنعاد.
+"""
+
+PRESENTER_UPLOAD = """
+import os
+
+from google.colab import drive, files
+
+USE_DRIVE = True  # keep finished shots on Google Drive so a crash loses nothing
+if USE_DRIVE:
+    drive.mount("/content/drive")
+os.makedirs("/content/job_upload", exist_ok=True)
+if not os.path.exists("/content/job_upload/package.zip"):
+    uploaded = files.upload()  # choose package.zip
+    name = next(iter(uploaded))
+    with open("/content/job_upload/package.zip", "wb") as fp:
+        fp.write(uploaded[name])
+print("job package ready")
+"""
+
+PRESENTER_RUN = """
+import subprocess
+import sys
+
+subprocess.run([sys.executable, "/content/presenter_worker.py", "--job", "/content/job_upload",
+                "--work", "/content/presenter", "--lowvram"], check=True)
+"""
+
+PRESENTER_DOWNLOAD = """
+import glob
+import json
+import shutil
+
+from google.colab import files
+
+summary = sorted(glob.glob("/content/**/output/*/summary.json", recursive=True)
+                 + glob.glob("/content/drive/MyDrive/MoneyPrinterPresenter/output/*/summary.json"),
+                 key=os.path.getmtime)[-1]
+out_dir = os.path.dirname(summary)
+print(json.load(open(summary)))
+shutil.make_archive("/content/results", "zip", out_dir)
+files.download("/content/results.zip")
+"""
+
+
+def build_presenter_colab() -> dict:
+    with open(PRESENTER_SCRIPT, encoding="utf-8") as fp:
+        worker = fp.read()
+    return {
+        "cells": [
+            markdown(PRESENTER_INTRO),
+            code(PRESENTER_UPLOAD),
+            markdown("### الكود (ما في داعي تعدّلي فيه)"),
+            code("%%writefile /content/presenter_worker.py\n" + worker),
+            code(PRESENTER_RUN),
+            code(PRESENTER_DOWNLOAD),
+        ],
+        "metadata": {
+            "accelerator": "GPU",
+            "colab": {"gpuType": "T4", "provenance": []},
+            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+            "language_info": {"name": "python"},
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+
+
 def main() -> None:
-    for path, notebook in ((NOTEBOOK, build()), (COLAB_NOTEBOOK, build_colab())):
+    for path, notebook in ((NOTEBOOK, build()), (COLAB_NOTEBOOK, build_colab()),
+                           (PRESENTER_COLAB_NOTEBOOK, build_presenter_colab())):
         with open(path, "w", encoding="utf-8") as fp:
             json.dump(notebook, fp, ensure_ascii=False, indent=1)
             fp.write("\n")

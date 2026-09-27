@@ -41,6 +41,7 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
+from app.services import branding
 from app.services import subtitle_styles
 from app.services.utils import video_effects
 from app.utils import file_security, rtl_text, utils
@@ -957,6 +958,11 @@ def combine_videos(
 
     processed_clips = []
     subclipped_items = []
+    # Sequential mode uses the first segment of every source, in order. Later
+    # segments are kept as a reserve so a short source list is extended with
+    # new footage instead of looping clips that were already shown.
+    later_segments = []
+    sequential_mode = video_concat_mode.value == VideoConcatMode.sequential.value
     video_duration = 0
     for video_path in video_paths:
         clip = _open_video_clip_quietly(video_path)
@@ -965,6 +971,7 @@ def combine_videos(
         close_clip(clip)
         
         start_time = 0
+        segment_index = 0
 
         while start_time < clip_duration:
             end_time = min(start_time + source_clip_duration, clip_duration)
@@ -973,20 +980,21 @@ def combine_videos(
             # 这样既不会丢掉“整段视频本身就短于 max_clip_duration”的素材，
             # 也不会吞掉长视频最后剩下的一小段尾部内容。
             if end_time > start_time:
-                subclipped_items.append(
-                    SubClippedVideoClip(
-                        file_path=video_path,
-                        start_time=start_time,
-                        end_time=end_time,
-                        width=clip_w,
-                        height=clip_h,
-                        source_file_path=video_path,
-                    )
+                segment = SubClippedVideoClip(
+                    file_path=video_path,
+                    start_time=start_time,
+                    end_time=end_time,
+                    width=clip_w,
+                    height=clip_h,
+                    source_file_path=video_path,
                 )
+                if sequential_mode and segment_index > 0:
+                    later_segments.append((segment_index, len(later_segments), segment))
+                else:
+                    subclipped_items.append(segment)
+                segment_index += 1
 
             start_time = end_time
-            if video_concat_mode.value == VideoConcatMode.sequential.value:
-                break
 
     subclipped_items = _prioritize_unique_source_clips(
         subclipped_items=subclipped_items,
@@ -994,6 +1002,8 @@ def combine_videos(
         **({"source_usage": source_usage, "source_groups": source_groups}
            if source_usage is not None else {}),
     )
+    # Second segments of every source first, then third segments, and so on.
+    subclipped_items.extend(segment for _, _, segment in sorted(later_segments, key=lambda s: s[:2]))
         
     logger.debug(f"total subclipped items: {len(subclipped_items)}")
     
@@ -1720,6 +1730,14 @@ def generate_video(
                 text_clips.append(clip)
             video_clip = CompositeVideoClip([video_clip, *text_clips])
             clip_stack.callback(video_clip.close)
+
+        if getattr(params, "add_logo_watermark", False):
+            watermark = branding.watermark_clip(
+                video_width, video_height, video_clip.duration, output_dir
+            )
+            if watermark is not None:
+                video_clip = CompositeVideoClip([video_clip, watermark])
+                clip_stack.callback(video_clip.close)
 
         bgm_enabled = bgm_service.should_use_bgm(
             params.bgm_type, params.bgm_volume
