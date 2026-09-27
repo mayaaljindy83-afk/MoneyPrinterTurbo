@@ -93,7 +93,7 @@ def t(key: str) -> str:
 st.title(t("title"))
 st.caption(t("intro"))
 
-waiting = [j for j in job_package.list_jobs() if studio.was_interrupted(j)]
+waiting = [j for j in job_package.list_jobs() if studio.can_continue(j)]
 if waiting:
     st.warning(f"{t('stopped_jobs')}: " + ", ".join(waiting))
 
@@ -146,7 +146,7 @@ with st.expander(t("create_ai")):
         status = studio.read_status(create_job)
         st.write(f"{t('status')}: **{status.get('state')}** {status.get('kaggle', '')}")
         st.code("\n".join(status.get("log", [])[-8:]) or "...")
-        if studio.was_interrupted(create_job):
+        if studio.can_continue(create_job):
             st.warning(t("interrupted"))
             if st.button(t("continue"), key=f"resume_{create_job}", disabled=not kaggle_agent.configured_token()):
                 studio.start_resume(create_job, kaggle_agent.configured_token())
@@ -235,7 +235,7 @@ if jobs:
     if col_again.button(t("assemble"), disabled=busy or not studio.rendered_shots(job_id)):
         studio.start_assembly(job_id, options)
         st.rerun()
-    if studio.was_interrupted(job_id):
+    if studio.can_continue(job_id):
         st.warning(t("interrupted"))
         if st.button(t("continue"), type="primary", key=f"resume_{job_id}",
                      disabled=not kaggle_agent.configured_token()):

@@ -146,6 +146,8 @@ def update_shots(job_id: str, shots: list[dict]) -> dict:
 def prepare_package(job_id: str, tts=None) -> str:
     plan = job_package.load_plan(job_id)
     presenter = profiles.load_presenter(plan["presenter"])
+    if plan.get("kind") == "marketing":
+        presenter.voice_name = profiles.voice_for(presenter, plan.get("language", ""))
     places = {p["name"]: p for p in plan.get("places", [])}
     set_status(job_id, "preparing", "recording the narration")
     folder = job_package.build_package(
@@ -220,6 +222,10 @@ def default_params(plan: dict, options: dict | None = None) -> VideoParams:
 
 def render_final(job_id: str, options: dict | None = None) -> str:
     plan = job_package.load_plan(job_id)
+    if plan.get("kind") == "marketing":  # website ad: composited scenes
+        from app.services.marketing import pipeline
+
+        return pipeline.render(job_id, options)
     set_status(job_id, "assembling", "assembling the final video")
     final = assemble.assemble(job_id, default_params(plan, options),
                               progress=lambda p: set_status(job_id, progress=0.9 + p * 0.1))
@@ -227,12 +233,18 @@ def render_final(job_id: str, options: dict | None = None) -> str:
     return final
 
 
+def _has_previous_output(job_id: str) -> bool:
+    return os.path.isfile(os.path.join(job_package.job_dir(job_id), "output", "progress.json"))
+
+
 def _run_on_kaggle(job_id: str, token: str, options: dict, agent=None) -> None:
     if not os.path.isfile(os.path.join(job_package.job_dir(job_id), "package", "job.json")):
         prepare_package(job_id)
     agent = agent or KaggleAgent(token=token, log=lambda m: set_status(job_id, message=m))
     set_status(job_id, "running", "sending the job to Kaggle")
-    summary = agent.run_job(job_id, on_status=lambda s: set_status(job_id, kaggle=s))
+    # Shots finished by an earlier run go up with the job and are not rendered again.
+    summary = agent.run_job(job_id, on_status=lambda s: set_status(job_id, kaggle=s),
+                            continuing=_has_previous_output(job_id))
     set_status(job_id, "rendered", f"{summary.get('done', 0)}/{summary.get('total', 0)} shots rendered",
                summary=summary)
     render_final(job_id, options)
@@ -251,6 +263,22 @@ def was_interrupted(job_id: str) -> bool:
     return read_status(job_id).get("state") in ACTIVE_STATES and not is_busy(job_id)
 
 
+def has_kaggle_run(job_id: str) -> bool:
+    try:
+        with open(os.path.join(job_package.job_dir(job_id), "kaggle.json"), encoding="utf-8") as fp:
+            return bool(json.load(fp).get("kernel"))
+    except (OSError, ValueError):
+        return False
+
+
+def can_continue(job_id: str) -> bool:
+    """Continue is offered after a break, and after a local error once a Kaggle run exists
+    (its results can still be fetched without running the GPU again)."""
+    if is_busy(job_id):
+        return False
+    return was_interrupted(job_id) or (read_status(job_id).get("state") == "error" and has_kaggle_run(job_id))
+
+
 def is_creation_job(job_id: str) -> bool:
     try:
         return job_package.load_plan(job_id).get("kind") == "create_presenter"
@@ -265,12 +293,15 @@ def _resume(job_id: str, token: str, options: dict, agent=None) -> None:
     package_ready = os.path.isfile(os.path.join(job_package.job_dir(job_id), "package", "job.json"))
     if not creation and not package_ready:
         prepare_package(job_id)
-    summary = agent.resume(job_id, max_runs=1 if creation else 4,
-                           on_status=lambda s: set_status(job_id, kaggle=s))
+    # Continue only fetches: it never starts a new GPU run by itself (max_runs=1 means "the
+    # last run only"). Missing shots are reported; rendering them is the user's explicit choice.
+    summary = agent.resume(job_id, max_runs=1, on_status=lambda s: set_status(job_id, kaggle=s))
     if creation:
         set_status(job_id, "done", "candidates ready")
         return
-    set_status(job_id, "rendered", f"{summary.get('done', 0)}/{summary.get('total', 0)} shots rendered",
+    missing = summary.get("remaining") or []
+    set_status(job_id, "rendered", f"{summary.get('done', 0)}/{summary.get('total', 0)} shots rendered"
+               + (f"; missing: {', '.join(missing)} (press Render to make only these)" if missing else ""),
                summary=summary)
     render_final(job_id, options)
 

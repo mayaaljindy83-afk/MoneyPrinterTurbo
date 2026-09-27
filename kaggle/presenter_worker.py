@@ -103,7 +103,7 @@ TALK_MODELS = ["wan2.1_infiniteTalk_single_fp16.safetensors", "wav2vec2-chinese-
 CREATE_MODELS = ["z_image_turbo_bf16.safetensors", "qwen_3_4b.safetensors", "ae.safetensors"]
 
 TALK_TYPES = {"TALK", "POINT"}
-MOTION_TYPES = {"WALK", "BROLL"}
+MOTION_TYPES = {"WALK", "BROLL", "AI_SCENE"}  # AI_SCENE: text-to-image first frame, no presenter
 NEGATIVE = ("blurry, low quality, distorted face, deformed hands, extra fingers, extra limbs, text, watermark, "
             "logo, subtitles, static, frozen, jitter")
 
@@ -203,7 +203,7 @@ def validate_job(job: dict) -> None:
         if float(shot.get("duration", 0)) <= 0:
             raise SystemExit(f"shot {shot['id']}: duration must be positive")
     if not (job.get("presenter") or {}).get("reference_images"):
-        needs_presenter = any(s["type"] != "BROLL" for s in shots if not s.get("local"))
+        needs_presenter = any(s["type"] not in ("BROLL", "AI_SCENE") for s in shots if not s.get("local"))
         if needs_presenter:
             raise SystemExit("presenter.reference_images is required")
 
@@ -371,6 +371,11 @@ def placement_prompt(shot: dict, presenter: dict, has_location_photo: bool) -> s
     camera = shot.get("camera") or "medium shot"
     keep = ("Keep her face, hairstyle, skin tone and outfit exactly the same as in the reference image. "
             "Photorealistic, natural light, sharp focus, realistic proportions.")
+    if shot.get("green"):
+        # Keyed out and composited on the laptop (website world scenes).
+        return (f"Keep the person from image 1 ({look}) and replace the whole background with a flat, evenly lit, "
+                f"pure green (#00FF00) chroma key studio backdrop without shadows or objects. She is {action}. "
+                f"Knees-up framing, centred, facing the camera, with space above her head. {keep}")
     if has_location_photo and shot.get("screen"):
         return (f"Show the person from image 2 ({look}) in a bright modern presentation room, standing next to "
                 f"a large wall screen that displays the website from image 1. She is {action}. {camera}. "
@@ -396,7 +401,14 @@ def motion_prompt(shot: dict) -> str:
 
 def talk_prompt(shot: dict) -> str:
     action = shot.get("action") or "talks to the camera with natural hand gestures"
-    return f"A woman {action}, {shot.get('camera') or 'medium shot'}, natural expressions, realistic."
+    background = " Plain flat green studio background that never changes." if shot.get("green") else ""
+    return f"A woman {action}, {shot.get('camera') or 'medium shot'}, natural expressions, realistic.{background}"
+
+
+def ai_scene_prompt(shot: dict) -> str:
+    place = shot.get("location") or "a cinematic modern technology space"
+    return (f"{place}, cinematic lighting, photorealistic, high detail, shallow depth of field, "
+            "no text, no letters, no logos, no user interface, no people")
 
 
 # --------------------------------------------------------------------------- ComfyUI
@@ -702,6 +714,8 @@ class Worker:
     # -- stage A: first frames ------------------------------------------------
     def make_frames(self) -> None:
         shots = [s for s in self.pending() if not os.path.isfile(self.frame_path(s))]
+        self.make_ai_frames([s for s in shots if s["type"] == "AI_SCENE"])
+        shots = [s for s in shots if s["type"] != "AI_SCENE"]
         if not shots:
             return
         ensure_models(IMAGE_MODELS, self.comfy.dir, self.cache_dirs)
@@ -747,6 +761,34 @@ class Worker:
         finally:
             self.comfy.stop()
             free_models(IMAGE_MODELS, self.comfy.dir)
+
+    def make_ai_frames(self, shots: list[dict]) -> None:
+        """First frames of AI_SCENE shots: Z-Image Turbo text-to-image (no presenter, no text)."""
+        if not shots:
+            return
+        ensure_models(CREATE_MODELS, self.comfy.dir, self.cache_dirs)
+        self.comfy.start(self.comfy_args)
+        width, height = (1280, 720) if self.width > self.height else (720, 1280)
+        try:
+            for shot in shots:
+                if self.time_left() < 600:
+                    log("time budget reached during AI scene frames; stopping")
+                    return
+                started = time.time()
+                try:
+                    images = self.comfy.run(build_portrait_workflow(
+                        ai_scene_prompt(shot), width, height, f"aiframe_{shot['id']}",
+                        self.seed + int(re.sub(r"\D", "", shot["id"]) or 0)))
+                except RuntimeError as exc:
+                    log(f"[{shot['id']}] AI scene frame FAILED: {exc}")
+                    self.progress.set(shot["id"], status="failed", error=str(exc)[-500:])
+                    continue
+                fit_image(images[-1], self.frame_path(shot), self.width, self.height, pad_color=None)
+                os.remove(images[-1])
+                self.progress.set(shot["id"], frame="text-to-image", frame_seconds=round(time.time() - started, 1))
+        finally:
+            self.comfy.stop()
+            free_models(CREATE_MODELS, self.comfy.dir)
 
     # -- stage B: video ---------------------------------------------------------
     def make_videos(self) -> None:

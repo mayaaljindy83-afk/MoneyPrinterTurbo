@@ -109,13 +109,16 @@ $DataDir = Read-Host "  Data folder [press Enter for $suggested]"
 if ([string]::IsNullOrWhiteSpace($DataDir)) { $DataDir = $suggested }
 $DataDir = $DataDir.Trim().Trim('"')
 try { New-Item -ItemType Directory -Force -Path $DataDir -ErrorAction Stop | Out-Null } catch { Fail "Cannot create folder $DataDir" }
-foreach ($sub in @("temp", "pip-cache", "ollama-models", "music", "branding")) {
+foreach ($sub in @("temp", "pip-cache", "ollama-models", "music", "branding", "playwright-browsers")) {
     New-Item -ItemType Directory -Force -Path (Join-Path $DataDir $sub) | Out-Null
 }
 # Keep every temporary and cache file off the small C: drive.
 $env:TEMP = Join-Path $DataDir "temp"
 $env:TMP = $env:TEMP
+$env:PYTHONUTF8 = "1"  # Python reads/writes text as UTF-8 (Arabic), not the Windows code page
 $env:PIP_CACHE_DIR = Join-Path $DataDir "pip-cache"
+# The browser that reads websites (AI Website Video) lives on the data drive too.
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $DataDir "playwright-browsers"
 $ModelsDir = Join-Path $DataDir "ollama-models"
 Ok "Data folder: $DataDir"
 
@@ -192,6 +195,10 @@ $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
 & $VenvPython -m pip install -r "windows\requirements-lock.txt"
 if ($LASTEXITCODE -ne 0) { Fail "Package installation failed. Check your internet and run install.bat again." }
 Ok "Packages installed."
+Write-Host "  Installing the browser that reads websites (about 150 MB, into $env:PLAYWRIGHT_BROWSERS_PATH)..."
+& $VenvPython -m playwright install chromium
+if ($LASTEXITCODE -ne 0) { Warn "Browser install failed. AI Website Video needs it: run install.bat again later." }
+else { Ok "Website browser installed." }
 
 # ---------------------------------------------------------------------------
 Step 7 "Your free API keys (stored only on this laptop)"

@@ -120,11 +120,15 @@ def build_package(job_id: str, presenter: Presenter, shots: list[dict], settings
         audio_path = os.path.join(package, audio_name)
         srt_path = os.path.join(root, "subtitles", f"{shot['id']}.srt")
         if not (os.path.isfile(audio_path) and shot.get("duration")):
-            shot["duration"] = record_narration(shot, audio_path, srt_path, presenter.voice_name,
-                                                presenter.voice_rate, tts)
+            spoken = record_narration(shot, audio_path, srt_path, presenter.voice_name, presenter.voice_rate, tts)
+            # ``min_duration``: the storyboard length; the picture holds after the narration ends.
+            shot["duration"] = round(max(spoken, float(shot.get("min_duration") or 0)), 3)
         entry = {k: shot[k] for k in ("id", "type", "narration", "location", "action", "camera", "duration")
                  if k in shot}
         entry["audio"] = audio_name
+        for flag in ("green", "local"):  # green: keyed and composited locally; local: made on the laptop
+            if shot.get(flag):
+                entry[flag] = True
         place = places.get(shot.get("place", ""))
         if place:
             if place["path"] not in location_files:

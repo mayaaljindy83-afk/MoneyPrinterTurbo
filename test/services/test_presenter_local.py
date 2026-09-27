@@ -274,7 +274,7 @@ if __name__ == "__main__":
 class FakeAgent:
     """Pretends to be Kaggle: 'renders' every cloud shot as a colour clip."""
 
-    def run_job(self, job_id, on_status=None, max_runs=4):
+    def run_job(self, job_id, on_status=None, max_runs=4, continuing=False):
         root = job_package.job_dir(job_id)
         with open(os.path.join(root, "package", "job.json"), encoding="utf-8") as fp:
             job = json.load(fp)
