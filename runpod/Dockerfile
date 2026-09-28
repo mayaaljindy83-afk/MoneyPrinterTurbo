@@ -3,7 +3,7 @@
 FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONUTF8=1 MPT_COMFY_DIR=/comfy
-RUN apt-get update && apt-get install -y --no-install-recommends git curl ffmpeg \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git curl ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
