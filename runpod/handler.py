@@ -207,7 +207,7 @@ def tts(inp: dict) -> dict:
         json.dump({"items": request}, fp, ensure_ascii=False)
     env = dict(os.environ)
     cache = os.path.join(VOLUME, "hf") if os.path.isdir(VOLUME) else os.path.join(work, "hf")
-    env.update({"HF_HOME": cache, "PYTHONUTF8": "1"})
+    env.update({"HF_HOME": cache, "MPT_NEMO_CACHE": os.path.join(cache, "nemo_grammars"), "PYTHONUTF8": "1"})
     out = os.path.join(work, "out")
     run = subprocess.run([SILMA_PYTHON, TTS_ENGINES[engine], os.path.join(work, "request.json"), out],
                          capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)

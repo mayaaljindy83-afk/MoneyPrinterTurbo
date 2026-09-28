@@ -20,11 +20,27 @@ DEFAULT_REF = ("infer/ref_audio_samples/ar.ref.24k.wav",
                "ويدقق النظر في القرآن الكريم وسائر الكتب السماوية ويتبع مسالك الرسل العظام عليهم الصلاة والسلام.")
 
 
+def preload_normalizers(cache_dir: str) -> None:
+    """NeMo builds its number/text grammars in ~75 s; with a cache folder (on the network volume)
+    later cold starts load them in seconds. SILMA then reuses these instances."""
+    if not cache_dir:
+        return
+    os.makedirs(cache_dir, exist_ok=True)
+    from nemo_text_processing.text_normalization.normalize import Normalizer
+    from silma_tts.infer import utils_infer
+
+    if utils_infer.nemo_ar_normalizer is None:
+        utils_infer.nemo_ar_normalizer = Normalizer(input_case="cased", lang="ar", cache_dir=cache_dir)
+    if utils_infer.nemo_en_normalizer is None:
+        utils_infer.nemo_en_normalizer = Normalizer(input_case="cased", lang="en", cache_dir=cache_dir)
+
+
 def main(request_path: str, out_dir: str) -> int:
     with open(request_path, encoding="utf-8") as fp:
         request = json.load(fp)
     os.makedirs(out_dir, exist_ok=True)
     started = time.time()
+    preload_normalizers(os.environ.get("MPT_NEMO_CACHE", ""))
     from silma_tts.api import SilmaTTS
 
     tts = SilmaTTS(hf_cache_dir=os.environ.get("HF_HOME"))

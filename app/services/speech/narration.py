@@ -17,12 +17,13 @@ def language_of(voice_name: str) -> str:
 
 
 def processor_for(voice_name: str, engine: str = "edge", overrides: dict | None = None) -> PronunciationProcessor:
-    """Edge reads digits well itself (with Arabic grammar), so numbers stay digits there; engines
-    trained on words (SILMA/F5) get them spelled out. Tashkeel from the LLM is opt-in
-    (``pronunciation_tashkeel`` in config.toml / the Voice Lab)."""
+    """Edge and SILMA both read digits themselves (SILMA through its NeMo text normaliser), so numbers
+    stay digits for them; other engines get them spelled out. LLM tashkeel is opt-in for Edge
+    (``pronunciation_tashkeel`` / the Voice Lab); SILMA always adds its own (CATT)."""
     language = language_of(voice_name)
-    tashkeel = bool(config.app.get("pronunciation_tashkeel", False)) and language == "ar"
-    return PronunciationProcessor(language, numbers="keep" if engine == "edge" else "words", overrides=overrides,
+    tashkeel = bool(config.app.get("pronunciation_tashkeel", False)) and language == "ar" and engine == "edge"
+    numbers = "keep" if engine in ("edge", "silma") else "words"
+    return PronunciationProcessor(language, numbers=numbers, overrides=overrides,
                                   diacritizer=llm_diacritizer if tashkeel else None)
 
 

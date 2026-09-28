@@ -80,11 +80,13 @@ class TestNarration(Case):
         processor = narration.processor_for("en-US-JennyNeural")
         self.assertEqual(narration.prepare("Try QAI-VO today", processor)["spoken"], "Try Q A I V O today.")
 
-    def test_edge_keeps_digits_other_engines_get_words(self):
+    def test_edge_and_silma_keep_digits_other_engines_get_words(self):
         edge = narration.prepare("خلال 48 ساعة", narration.processor_for("ar-SA-X"))
         silma = narration.prepare("خلال 48 ساعة", narration.processor_for("ar-SA-X", engine="silma"))
+        other = narration.prepare("خلال 48 ساعة", narration.processor_for("ar-SA-X", engine="f5"))
         self.assertIn("48", edge["spoken"])
-        self.assertIn("ثمانية وأربعون", silma["spoken"])
+        self.assertIn("48", silma["spoken"])  # SILMA's own normaliser reads it
+        self.assertIn("ثمانية وأربعون", other["spoken"])
 
     def test_tashkeel_is_opt_in(self):
         with mock.patch("app.services.speech.narration.llm_diacritizer", return_value="نَصٌّ") as llm:
