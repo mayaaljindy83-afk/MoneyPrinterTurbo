@@ -212,3 +212,43 @@ def read(folder: str) -> tuple[dict, dict]:
             return {}
 
     return load("status.json"), load("benchmark.json")
+
+
+# --------------------------------------------------------------------------- brand pronunciation (by ear)
+BRAND_SENTENCE = {"ar": "مرحباً بكم في {brand}، منصتكم للبحث الأكاديمي.",
+                  "en": "Welcome to {brand}, your academic research platform."}
+
+
+def brand_test(language: str, tts=None) -> list[dict]:
+    """Each way of writing QAI-VO for the voice, in the same short sentence, to choose by ear.
+    Edge only (seconds, free). Returns [{"variant", "file", "text"}] in <data>/voice_lab/brand_<lang>/."""
+    from app.services.speech.pronunciation import BRAND_VARIANTS
+
+    folder = os.path.join(utils.storage_dir("voice_lab"), f"brand_{language}")
+    os.makedirs(folder, exist_ok=True)
+    results = []
+    for index, variant in enumerate(BRAND_VARIANTS[language], start=1):
+        text = BRAND_SENTENCE[language].format(brand=variant)
+        path = os.path.join(folder, f"variant_{index}.wav")
+        edge(text, language, path, tts)
+        results.append({"variant": variant, "file": path, "text": text})
+    with open(os.path.join(folder, "variants.json"), "w", encoding="utf-8") as fp:
+        json.dump(results, fp, ensure_ascii=False, indent=2)
+    return results
+
+
+def saved_brand_test(language: str) -> list[dict]:
+    try:
+        with open(os.path.join(utils.storage_dir("voice_lab"), f"brand_{language}", "variants.json"),
+                  encoding="utf-8") as fp:
+            return [r for r in json.load(fp) if os.path.isfile(r["file"])]
+    except (OSError, ValueError):
+        return []
+
+
+def choose_brand(language: str, variant: str) -> None:
+    """Use this spelling for QAI-VO in every video of this language (display text stays QAI-VO)."""
+    from app.config import config
+
+    config.app[f"qai_vo_spoken_{language}"] = variant
+    config.save_config()

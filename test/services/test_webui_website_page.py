@@ -96,6 +96,18 @@ class TestWebsitePage(unittest.TestCase):
         self.assertTrue(preview.disabled)  # no Kaggle token yet
         self.assertTrue(full.disabled)  # preview first
 
+    def test_voice_is_chosen_per_video_on_the_page(self):
+        self._presenter()
+        project = pipeline.analyze("https://qai-vo.com/products/academic", "ar", 30, "youtube", "leads",
+                                   presenter="QAI", read=fake_read, generate=lambda p: "not json")
+        with mock.patch.object(config, "save_config"):
+            app = self._app()
+            voice = next(s for s in app.selectbox if s.label == "الصوت")
+            self.assertEqual(voice.value, pipeline.voice_style(project))
+            voice.set_value("edge_tashkeel").run()
+            self.assertFalse(app.exception, app.exception)
+        self.assertEqual(pipeline.load_project(project["project_id"])["voice_style"], "edge_tashkeel")
+
     def test_interrupted_preview_offers_continue(self):
         self._presenter()
         project = pipeline.analyze("https://qai-vo.com/products/academic", "en", 30, "youtube", "leads",

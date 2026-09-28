@@ -82,3 +82,45 @@ def write_display_srt(sub_maker, lines: list[tuple[str, str]], subtitle_file: st
     with open(subtitle_file, "w", encoding="utf-8") as fp:
         fp.write("\n".join(entries))
     return True
+
+
+# --------------------------------------------------------------------------- voice styles (per video)
+# The same five setups as the Voice Lab; chosen per video on the page, remembered per language.
+STYLES = ("edge_plain", "edge_fixed", "edge_tashkeel", "silma", "silma_lina")
+DEFAULT_STYLE = "edge_fixed"
+
+
+def default_style(language: str) -> str:
+    style = str(config.app.get(f"voice_style_{language_of(language)}", "") or "")
+    return style if style in STYLES else DEFAULT_STYLE
+
+
+def remember_style(language: str, style: str) -> None:
+    if style in STYLES and config.app.get(f"voice_style_{language_of(language)}") != style:
+        config.app[f"voice_style_{language_of(language)}"] = style
+        config.save_config()
+
+
+def processor_for_style(voice_name: str, style: str) -> PronunciationProcessor | None:
+    """None for "edge_plain" (the text as written)."""
+    language = language_of(voice_name)
+    if style == "edge_plain":
+        return None
+    if style.startswith("silma"):
+        return PronunciationProcessor(language, numbers="keep")  # SILMA: own tashkeel + number reading
+    tashkeel = style == "edge_tashkeel" and language == "ar"
+    return PronunciationProcessor(language, numbers="keep", diacritizer=llm_diacritizer if tashkeel else None)
+
+
+def write_even_srt(lines: list[tuple[str, str]], duration: float, subtitle_file: str) -> None:
+    """Subtitles for engines without word timings (SILMA): each display line gets a share of the audio
+    proportional to the length of its spoken text."""
+    weights = [max(1, len(spoken)) for _, spoken in lines]
+    total, start, entries = sum(weights), 0.0, []
+    for index, ((display, _), weight) in enumerate(zip(lines, weights)):
+        end = start + duration * weight / total
+        entries.append(f"{index + 1}\n{_srt_time(start)} --> {_srt_time(end)}\n{display.strip()}\n")
+        start = end
+    os.makedirs(os.path.dirname(subtitle_file) or ".", exist_ok=True)
+    with open(subtitle_file, "w", encoding="utf-8") as fp:
+        fp.write("\n".join(entries))

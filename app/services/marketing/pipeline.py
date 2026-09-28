@@ -216,6 +216,27 @@ def scene_to_shot(scene: dict) -> dict:
     return shot
 
 
+def voice_style(project: dict) -> str:
+    """The voice setup of this video (Voice Lab names); new projects get the last one chosen for the language."""
+    from app.services.speech import narration
+
+    style = project.get("voice_style") or narration.default_style(project.get("language", ""))
+    return style if style in narration.STYLES else narration.DEFAULT_STYLE
+
+
+def set_voice_style(project_id: str, style: str) -> dict:
+    """Choose the voice for this video. Takes effect for the next preview/full render (the lips are
+    generated from the audio, so a new voice means a new GPU render of the presenter)."""
+    from app.services.speech import narration
+
+    if style not in narration.STYLES:
+        raise ValueError(f"unknown voice style {style!r}")
+    project = load_project(project_id)
+    project["voice_style"] = style
+    narration.remember_style(project.get("language", ""), style)
+    return save_project(project)
+
+
 def create_job(project_id: str, mode: str) -> str:
     """Make the presenter job (preview or full) for a project; returns its job id."""
     project = load_project(project_id)
@@ -229,7 +250,8 @@ def create_job(project_id: str, mode: str) -> str:
         "job_id": job_id, "kind": "marketing", "mode": mode, "project_id": project_id,
         "topic": project["plan"].get("service_name", ""), "language": project["language"],
         "aspect": project["aspect"], "presenter": project["presenter"], "places": [], "shots": shots,
-        "scenes": scenes, "website_dir": project["website_dir"], "created": time.time()})
+        "scenes": scenes, "website_dir": project["website_dir"], "created": time.time(),
+        "voice_style": voice_style(project)})
     project["jobs"][mode] = job_id
     save_project(project)
     studio.set_status(job_id, "planned", f"{mode} job with {len(shots)} scenes")
@@ -240,6 +262,8 @@ def start(project_id: str, mode: str, token: str, options: dict | None = None, a
     """Create (or reuse the unfinished) job and render it on Kaggle in the background."""
     project = load_project(project_id)
     job_id = project["jobs"].get(mode)
+    if job_id and job_package.load_plan(job_id).get("voice_style", voice_style(project)) != voice_style(project):
+        job_id = None  # another voice was chosen: record it and render the presenter again
     if job_id and (studio.can_continue(job_id) or studio.read_status(job_id).get("state") in studio.ACTIVE_STATES):
         studio.start_resume(job_id, token, options, agent=agent)  # fetch; never redo finished scenes
         return job_id

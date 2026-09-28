@@ -51,6 +51,26 @@ class TestPieces(Assets):
             self.assertEqual(alpha[600, 240], 255)  # body kept
             self.assertEqual(tuple(np.asarray(keyed)[600, 240][:3]), PRESENTER)
 
+    def test_face_close_to_a_light_background_is_not_punched_through(self):
+        """Regression (RunPod preview): light studio background, face and white blouse turned see-through."""
+        frame = np.full((300, 200, 3), (205, 200, 195), np.uint8)  # light beige-grey studio wall
+        frame[40:300, 50:150] = (40, 30, 30)  # dark hair + jacket silhouette
+        frame[60:120, 75:125] = (215, 185, 170)  # face, close to the wall colour
+        frame[150:220, 85:115] = (230, 228, 225)  # white blouse
+        keyed = np.asarray(c.key_frame(frame, c.key_color(frame)).getchannel("A"))
+        self.assertEqual(keyed[5, 5], 0)  # wall removed
+        self.assertEqual(keyed[90, 100], 255)  # face solid
+        self.assertEqual(keyed[185, 100], 255)  # blouse solid
+
+    def test_green_screen_never_removes_skin_or_white(self):
+        frame = np.full((100, 100, 3), (40, 200, 60), np.uint8)
+        frame[30:70, 30:70] = (215, 185, 170)  # skin
+        frame[45:55, 45:55] = (235, 235, 235)  # white
+        alpha = np.asarray(c.key_frame(frame, c.key_color(frame)).getchannel("A"))
+        self.assertEqual(alpha[2, 2], 0)
+        self.assertEqual(alpha[40, 40], 255)
+        self.assertEqual(alpha[50, 50], 255)
+
     def test_green_spill_is_reduced(self):
         frame = np.full((50, 50, 3), (0, 255, 0), np.uint8)
         frame[20:30, 20:30] = (120, 200, 110)  # greenish skin edge

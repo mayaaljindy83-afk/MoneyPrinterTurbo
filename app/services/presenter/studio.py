@@ -186,7 +186,8 @@ def prepare_package(job_id: str, tts=None) -> str:
     set_status(job_id, "preparing", "recording the narration")
     folder = job_package.build_package(
         job_id, presenter, plan["shots"], {"aspect": plan["aspect"], "language": plan["language"]}, places, tts=tts,
-        progress=lambda done, total: set_status(job_id, progress=done / total * 0.1))
+        progress=lambda done, total: set_status(job_id, progress=done / total * 0.1),
+        voice_style=plan.get("voice_style"))
     job_package.save_plan(job_id, plan)  # durations were added to the shots
     return folder
 
@@ -279,6 +280,8 @@ def _run_on_kaggle(job_id: str, token: str, options: dict, agent=None) -> None:
     # Shots finished by an earlier run go up with the job and are not rendered again.
     summary = agent.run_job(job_id, on_status=lambda s: set_status(job_id, kaggle=s),
                             continuing=_has_previous_output(job_id))
+    if _nothing_rendered(job_id, summary):
+        return
     if is_motion_job(job_id):  # motion-library candidates: nothing to assemble
         set_status(job_id, "done", f"{summary.get('done', 0)}/{summary.get('total', 0)} motion clips ready",
                    summary=summary, progress=1.0)
@@ -286,6 +289,16 @@ def _run_on_kaggle(job_id: str, token: str, options: dict, agent=None) -> None:
     set_status(job_id, "rendered", f"{summary.get('done', 0)}/{summary.get('total', 0)} shots rendered",
                summary=summary)
     render_final(job_id, options)
+
+
+def _nothing_rendered(job_id: str, summary: dict) -> bool:
+    """Never assemble a "video" from fallback photos when the GPU made no shot: say so instead
+    (and offer Render again, not Continue)."""
+    if summary.get("total") and not summary.get("done"):
+        set_status(job_id, "error", "ERROR: the GPU run finished but made no shot; the reason is in the lines "
+                   "above (FAILED ...).", error="no shot rendered", kaggle="error", summary=summary)
+        return True
+    return False
 
 
 def is_motion_job(job_id: str) -> bool:
@@ -375,6 +388,8 @@ def _resume(job_id: str, token: str, options: dict, agent=None) -> None:
     summary = agent.resume(job_id, max_runs=1, on_status=lambda s: set_status(job_id, kaggle=s))
     if creation or is_motion_job(job_id):
         set_status(job_id, "done", "candidates ready")
+        return
+    if _nothing_rendered(job_id, summary):
         return
     missing = summary.get("remaining") or []
     set_status(job_id, "rendered", f"{summary.get('done', 0)}/{summary.get('total', 0)} shots rendered"

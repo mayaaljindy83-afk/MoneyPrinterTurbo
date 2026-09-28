@@ -180,14 +180,49 @@ def key_color(frame: np.ndarray) -> np.ndarray:
     return np.median(border, axis=0)
 
 
+def _edge_connected(mask: np.ndarray) -> np.ndarray:
+    """Pixels of ``mask`` reachable from the image border through ``mask`` pixels."""
+    from PIL import ImageDraw
+
+    h, w = mask.shape
+    img = Image.fromarray((mask * 255).astype(np.uint8)).copy()  # copy: arrays come in read-only
+    step = max(1, min(h, w) // 64)
+    border = [(x, 0) for x in range(0, w, step)] + [(x, h - 1) for x in range(0, w, step)]
+    border += [(0, y) for y in range(0, h, step)] + [(w - 1, y) for y in range(0, h, step)]
+    for point in border:
+        if img.getpixel(point) == 255:
+            ImageDraw.floodfill(img, point, 128)
+    return np.asarray(img) == 128
+
+
+def is_green_screen(color: np.ndarray) -> bool:
+    return bool(color[1] > color[0] + 40 and color[1] > color[2] + 40)
+
+
 def key_frame(frame: np.ndarray, color: np.ndarray, low: float = 40, high: float = 95) -> Image.Image:
-    """RGB frame -> RGBA with the flat background removed and colour spill reduced."""
+    """RGB frame -> RGBA with the green background removed and colour spill reduced.
+
+    On a green screen only greenish pixels can become transparent: skin, white clothes and hair
+    are never cut out. On a plain grey/white background (a photo, or a shot where the model ignored
+    the green prompt) only the background connected to the frame edges is removed, so a face or a
+    white blouse close to the background colour is not punched through.
+    """
     rgb = frame.astype(np.float32)
     distance = np.sqrt(((rgb - color) ** 2).sum(axis=2))
     alpha = np.clip((distance - low) / (high - low), 0, 1)
-    if color[1] > color[0] + 40 and color[1] > color[2] + 40:  # green screen: remove green spill
-        limit = np.maximum(rgb[..., 0], rgb[..., 2])
-        rgb[..., 1] = np.minimum(rgb[..., 1], limit + 8)
+    if not is_green_screen(color):
+        # Plain (grey/white) background: only the background region connected to the frame edges is
+        # removed. A face or white shirt of a similar colour inside the silhouette stays solid.
+        alpha = np.where(_edge_connected(distance < high), alpha, 1.0)
+        out = np.dstack([np.clip(rgb, 0, 255), alpha * 255]).astype(np.uint8)
+        img = Image.fromarray(out)
+        img.putalpha(img.getchannel("A").filter(ImageFilter.MinFilter(3)).filter(ImageFilter.GaussianBlur(0.8)))
+        return img
+    # Protect everything that is not clearly green (green channel must dominate to be removed).
+    dominance = rgb[..., 1] - np.maximum(rgb[..., 0], rgb[..., 2])
+    alpha = np.maximum(alpha, np.clip((30 - dominance) / 20, 0, 1))
+    limit = np.maximum(rgb[..., 0], rgb[..., 2])  # remove green spill on the edges
+    rgb[..., 1] = np.minimum(rgb[..., 1], limit + 8)
     out = np.dstack([np.clip(rgb, 0, 255), alpha * 255]).astype(np.uint8)
     img = Image.fromarray(out)
     # Soften the edge by a pixel so it does not look cut out.
@@ -200,6 +235,7 @@ class PresenterSource:
 
     def __init__(self, video: str = "", image: str = "", height: int = 720, fps: int = FPS):
         self.height = height
+        self.keyed = True
         self.frames: list[Image.Image] = []
         self.index = 0
         if video and os.path.isfile(video):
@@ -229,6 +265,12 @@ class PresenterSource:
         count = len(raw) // (w * h * 3)
         frames = np.frombuffer(raw[: count * w * h * 3], np.uint8).reshape(count, h, w, 3)
         color = key_color(frames[0])
+        self.keyed = is_green_screen(color)
+        if not self.keyed:
+            from loguru import logger
+
+            logger.warning(f"presenter shot {os.path.basename(video)} has no green background "
+                           f"(border colour {color.astype(int).tolist()}): keyed by edge-connected region")
         crop = None
         for frame in frames:
             keyed = key_frame(frame, color)

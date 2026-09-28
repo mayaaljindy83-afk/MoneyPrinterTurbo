@@ -103,3 +103,77 @@ class TestNarration(Case):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVoiceStyles(Case):
+    def _tts(self, seen):
+        def tts(text, voice_name, voice_rate, voice_file):
+            seen.append(text)
+            subprocess.run([utils.get_ffmpeg_binary(), "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                            "sine=frequency=300:duration=2", voice_file], check=True)
+            return edge_like(text)
+        return tts
+
+    def test_each_edge_style_reads_the_right_text(self):
+        display = "مرحباً بكم في QAI-VO."
+        results = {}
+        for style in ("edge_plain", "edge_fixed", "edge_tashkeel"):
+            seen = []
+            with mock.patch("app.services.speech.narration.llm_diacritizer", side_effect=lambda t: t.replace("بكم", "بِكُمْ")):
+                job_package.record_narration({"id": "s1", "narration": display}, os.path.join(self.tmp, f"{style}.mp3"),
+                                             os.path.join(self.tmp, f"{style}.srt"), "ar-SA-ZariyahNeural-Female", 1.0,
+                                             tts=self._tts(seen), style=style)
+            results[style] = seen[0]
+        self.assertIn("QAI-VO", results["edge_plain"])  # as written
+        self.assertIn("كيو إيه آي", results["edge_fixed"])
+        self.assertNotIn("بِكُمْ", results["edge_fixed"])
+        self.assertIn("بِكُمْ", results["edge_tashkeel"])
+
+    def test_silma_style_records_all_shots_in_one_runpod_call(self):
+        from app.services.presenter import profiles
+        from PIL import Image
+
+        photo = os.path.join(self.tmp, "p.png")
+        Image.new("RGB", (400, 600), (180, 160, 150)).save(photo)
+        with mock.patch.dict(config.app, {"presenters_dir": ""}):
+            presenter = profiles.save_presenter(profiles.Presenter(name="Lina"), [photo])
+        presenter.voice_name = "ar-SA-ZariyahNeural-Female"
+        calls = []
+
+        class FakeAgent:
+            def call(self, payload, timeout=0):
+                import base64
+
+                calls.append(payload)
+                items = []
+                for item in payload["items"]:
+                    path = os.path.join(self_tmp, item["id"] + ".wav")
+                    subprocess.run([utils.get_ffmpeg_binary(), "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                                    "sine=frequency=220:duration=3", path], check=True)
+                    items.append({"id": item["id"], "wav": base64.b64encode(open(path, "rb").read()).decode()})
+                return {"items": items}
+
+        self_tmp = self.tmp
+        shots = [{"id": "s01", "type": "TALK", "narration": "مرحباً بكم في QAI-VO. ابدأ اليوم."},
+                 {"id": "s02", "type": "TALK", "narration": "نتحقق من روابط DOI."}]
+        seen = []
+        folder = job_package.build_package("job1", presenter, shots, {"aspect": "16:9"}, tts=self._tts(seen),
+                                           voice_style="silma_lina", agent=FakeAgent())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["mode"], "tts")
+        self.assertTrue(all(item.get("ref_wav") for item in calls[0]["items"]))  # Lina's voice to copy
+        self.assertIn("كيو إيه آي", calls[0]["items"][0]["text"])
+        self.assertEqual(len(seen), 1)  # Edge only read the short voice reference
+        self.assertTrue(os.path.isfile(os.path.join(folder, "audio", "s01.mp3")))
+        with open(os.path.join(job_package.job_dir("job1"), "subtitles", "s01.srt"), encoding="utf-8") as fp:
+            srt = fp.read()
+        self.assertIn("QAI-VO", srt)  # subtitles keep the display text
+        self.assertEqual(srt.count("-->"), 2)
+
+    def test_style_is_remembered_per_language(self):
+        with mock.patch.object(config, "save_config"), mock.patch.dict(config.app, {}):
+            self.assertEqual(narration.default_style("ar"), narration.DEFAULT_STYLE)
+            narration.remember_style("ar", "edge_tashkeel")
+            narration.remember_style("en", "edge_plain")
+            self.assertEqual(narration.default_style("ar-SA"), "edge_tashkeel")
+            self.assertEqual(narration.default_style("en"), "edge_plain")

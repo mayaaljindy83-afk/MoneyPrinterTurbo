@@ -240,6 +240,19 @@ class TestAnimateWorkflow(unittest.TestCase):
         pw.validate_job(job)
 
 
+class TestComfyErrors(unittest.TestCase):
+    def test_error_shows_exception_not_the_tensor_dump(self):
+        """Regression (first RunPod run): only the tail of the input-tensor dump reached the log."""
+        messages = [["execution_start", {}], ["execution_error", {
+            "node_id": "sampler", "node_type": "KSampler", "exception_type": "torch.OutOfMemoryError",
+            "exception_message": "CUDA out of memory. Tried to allocate 2.00 GiB",
+            "traceback": ["Traceback...\n", "  File nodes.py\n"],
+            "current_inputs": {"latent": ["tensor([[" + "-0.73, " * 2000 + "]])"]}}]]
+        text = pw.comfy_error(messages)
+        self.assertTrue(text.startswith("KSampler (node sampler): torch.OutOfMemoryError: CUDA out of memory"))
+        self.assertNotIn("-0.73", text)
+
+
 class TestMediaHelpers(unittest.TestCase):
     def test_fit_image_crop_and_pad(self):
         with tempfile.TemporaryDirectory() as tmp:
