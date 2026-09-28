@@ -230,6 +230,10 @@ class RunPodAgent:
                     offset += len(data)
             os.replace(partial, target)
         self.log(f"downloaded {len(listing.get('files', []))} files from RunPod")
+        summary = listing.get("summary") or {}
+        if summary.get("remaining"):  # show why shots are missing (the worker log's FAILED lines)
+            for line in [ln for ln in listing.get("log", []) if "FAILED" in ln or "ERROR" in ln][-4:]:
+                self.log(line[:600])
         timings = dict(self.last_run)
         timings["download_seconds"] = round(time.time() - started, 1)
         self._save_state(job_id, timings=timings)  # for benchmark.json

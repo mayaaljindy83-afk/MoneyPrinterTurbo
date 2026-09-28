@@ -576,7 +576,7 @@ class Comfy:
                 entry = history[prompt_id]
                 status = entry.get("status", {})
                 if status.get("status_str") == "error":
-                    raise RuntimeError(json.dumps(status.get("messages", []))[-2000:])
+                    raise RuntimeError(comfy_error(status.get("messages", [])))
                 images = []
                 for output in entry.get("outputs", {}).values():
                     for img in output.get("images", []):
@@ -584,6 +584,18 @@ class Comfy:
                 return sorted(images)
             time.sleep(5)
         raise RuntimeError("generation timed out")
+
+
+def comfy_error(messages: list) -> str:
+    """The useful part of a ComfyUI execution error: node, exception and the end of the traceback
+    (the raw message ends with a dump of the node's input tensors, which hid the actual error)."""
+    for entry in messages or []:
+        if isinstance(entry, (list, tuple)) and len(entry) == 2 and entry[0] == "execution_error":
+            info = entry[1] or {}
+            trace = "".join(info.get("traceback") or [])[-1200:]
+            return (f"{info.get('node_type', '?')} (node {info.get('node_id', '?')}): "
+                    f"{info.get('exception_type', '')}: {info.get('exception_message', '').strip()}\n{trace}").strip()
+    return json.dumps(messages)[:2000]
 
 
 def install_comfyui(comfy_dir: str) -> None:

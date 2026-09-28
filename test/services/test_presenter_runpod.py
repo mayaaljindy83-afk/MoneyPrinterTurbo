@@ -312,6 +312,18 @@ class TestAgent(RunPodCase):
         self.assertIn("Render", str(ctx.exception))
         self.assertEqual(states[-1], "error")  # studio.kaggle_run_failed -> Render, not an endless Continue
 
+    def test_run_that_made_no_shot_stops_instead_of_assembling_photos(self):
+        """Regression (first RunPod preview): 0/4 shots, then a 'video' of fallback photos."""
+        sys.modules["presenter_worker"] = fake_worker({})  # the worker ran but every shot failed
+        job_id = self.make_job(shots=("s01",))
+        job_package.save_plan(job_id, {"job_id": job_id, "kind": "video"})
+        with mock.patch.object(studio, "render_final", side_effect=AssertionError("must not assemble")):
+            studio._run_on_kaggle(job_id, "", {}, agent=self.agent(FakeRunPod(self.handler)))
+        status = studio.read_status(job_id)
+        self.assertEqual(status["state"], "error")
+        self.assertIn("made no shot", status["log"][-1])
+        self.assertTrue(studio.kaggle_run_failed(job_id))  # Render is offered again, not Continue
+
     def test_partial_run_is_reported_not_rerun_by_continue(self):
         sys.modules["presenter_worker"] = fake_worker({"s01": b"one"})
         job_id = self.make_job()
