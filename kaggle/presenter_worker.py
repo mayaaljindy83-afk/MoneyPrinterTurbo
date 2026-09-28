@@ -138,8 +138,11 @@ class Log:
         line = f"[{time.strftime('%H:%M:%S')}] {message}"
         print(line, flush=True)
         if self.path:
-            with open(self.path, "a", encoding="utf-8") as fp:
-                fp.write(line + "\n")
+            try:
+                with open(self.path, "a", encoding="utf-8") as fp:
+                    fp.write(line + "\n")
+            except OSError:
+                pass  # the console line above is enough; never stop the work for a log file
 
 
 log = Log()
@@ -540,9 +543,44 @@ def ensure_models(names: list[str], comfy_dir: str, cache_dirs: list[str]) -> No
         log(f"downloading {name} ...")
         started = time.time()
         partial = target + ".part"
-        run(["curl", "-L", "--fail", "--retry", "5", "--retry-delay", "10", "-C", "-", "-sS", "-o", partial, url])
+        download(url, partial)
         os.replace(partial, target)
         log(f"downloaded {name}: {os.path.getsize(target) / 1e9:.1f} GB in {(time.time() - started) / 60:.1f} min")
+
+
+DOWNLOAD_ATTEMPTS = 8
+
+
+def remote_size(url: str) -> int:
+    """Size of the file behind ``url`` (Hugging Face sends it as X-Linked-Size), 0 if unknown."""
+    try:
+        request = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return int(response.headers.get("X-Linked-Size") or response.headers.get("Content-Length") or 0)
+    except (urllib.error.URLError, ValueError, OSError):
+        return 0
+
+
+def download(url: str, partial: str) -> None:
+    """Download a big model file, resuming after any network drop.
+
+    Big files from Hugging Face regularly lose the connection (curl exit 92: "HTTP/2 stream was
+    not closed cleanly"), which curl's own --retry does not cover. Use HTTP/1.1, retry on every
+    error, abort a stalled transfer, and resume the partial file until it is complete.
+    """
+    expected = remote_size(url)
+    command = ["curl", "-L", "--fail", "--http1.1", "--retry", "5", "--retry-all-errors", "--retry-delay", "10",
+               "--connect-timeout", "30", "--speed-limit", "1000000", "--speed-time", "120",
+               "-C", "-", "-sS", "-o", partial, url]
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        code = subprocess.run(command).returncode
+        size = os.path.getsize(partial) if os.path.exists(partial) else 0
+        if (code == 0 and (not expected or size >= expected)) or (expected and size == expected):
+            return
+        log(f"download interrupted (curl exit {code}, {size / 1e9:.2f}"
+            f"{f' of {expected / 1e9:.2f}' if expected else ''} GB); resuming, attempt {attempt + 1}")
+        time.sleep(min(60, 10 * attempt))
+    raise RuntimeError(f"download failed after {DOWNLOAD_ATTEMPTS} attempts: {url}")
 
 
 def free_models(names: list[str], comfy_dir: str) -> None:

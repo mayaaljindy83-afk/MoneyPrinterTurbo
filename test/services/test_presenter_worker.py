@@ -356,3 +356,51 @@ class TestPresenterNotebook(unittest.TestCase):
                     mock.patch.object(pw.Worker, "create_presenter", lambda self: created.append(self.out)):
                 pw.main(["--job", job_dir, "--skip-setup"])
             self.assertEqual(created, [os.path.join(tmp, "out", "abc")])
+
+
+class TestModelDownload(unittest.TestCase):
+    """Regression: Kaggle run died at 'curl: (92) HTTP/2 stream 0 was not closed cleanly' on a 20 GB model."""
+
+    def _fake_curl(self, script):
+        calls = []
+
+        def run(command, *args, **kwargs):
+            calls.append(command)
+            partial = command[command.index("-o") + 1]
+            chunk, code = script[len(calls) - 1]
+            with open(partial, "ab") as fp:  # -C - resumes: new bytes are appended
+                fp.write(b"x" * chunk)
+            return subprocess.CompletedProcess(command, code)
+
+        return run, calls
+
+    def test_resumes_after_http2_stream_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            partial = os.path.join(tmp, "model.part")
+            fake, calls = self._fake_curl([(400, 92), (600, 0)])
+            with mock.patch.object(pw.subprocess, "run", fake), mock.patch.object(pw, "remote_size", return_value=1000), \
+                    mock.patch.object(pw.time, "sleep"):
+                pw.download("https://huggingface.co/x/model.safetensors", partial)
+            self.assertEqual(os.path.getsize(partial), 1000)
+            self.assertEqual(len(calls), 2)
+            for flag in ("--http1.1", "--retry-all-errors", "-C"):
+                self.assertIn(flag, calls[0])
+
+    def test_complete_file_counts_even_if_curl_complains(self):
+        # Resuming an already complete file makes the server answer 416 and curl exit non-zero.
+        with tempfile.TemporaryDirectory() as tmp:
+            partial = os.path.join(tmp, "model.part")
+            fake, calls = self._fake_curl([(1000, 92), (0, 22)])
+            with mock.patch.object(pw.subprocess, "run", fake), mock.patch.object(pw, "remote_size", return_value=1000), \
+                    mock.patch.object(pw.time, "sleep"):
+                pw.download("https://huggingface.co/x/model.safetensors", partial)
+            self.assertEqual(len(calls), 1)
+
+    def test_gives_up_after_all_attempts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake, calls = self._fake_curl([(10, 92)] * pw.DOWNLOAD_ATTEMPTS)
+            with mock.patch.object(pw.subprocess, "run", fake), mock.patch.object(pw, "remote_size", return_value=1000), \
+                    mock.patch.object(pw.time, "sleep"):
+                with self.assertRaises(RuntimeError):
+                    pw.download("https://huggingface.co/x/model.safetensors", os.path.join(tmp, "m.part"))
+            self.assertEqual(len(calls), pw.DOWNLOAD_ATTEMPTS)
