@@ -167,3 +167,48 @@ def run(engines: list[str], languages: list[str], folder: str | None = None, tts
     with open(os.path.join(folder, "benchmark.json"), "w", encoding="utf-8") as fp:
         json.dump(report, fp, ensure_ascii=False, indent=2)
     return report
+
+
+# --------------------------------------------------------------------------- background runs (for the page)
+def start(engines: list[str], languages: list[str], tts=None, agent=None) -> str:
+    """Run in the background (SILMA's first call downloads its model); returns the result folder.
+    ``status.json`` there says running / done / error."""
+    import threading
+
+    folder = lab_dir()
+
+    def status(state, **extra):
+        with open(os.path.join(folder, "status.json"), "w", encoding="utf-8") as fp:
+            json.dump({"state": state, "engines": engines, "languages": languages, **extra}, fp, ensure_ascii=False)
+
+    def work():
+        try:
+            run(engines, languages, folder, tts=tts, agent=agent,
+                progress=lambda entry: status("running", last=f"{entry['engine']} {entry['language']}"))
+            status("done")
+        except Exception as exc:
+            status("error", error=str(exc))
+
+    status("running")
+    threading.Thread(target=work, name="voice-lab", daemon=True).start()
+    return folder
+
+
+def runs() -> list[str]:
+    root = utils.storage_dir("voice_lab")
+    if not os.path.isdir(root):
+        return []
+    return [os.path.join(root, d) for d in sorted(os.listdir(root), reverse=True)
+            if os.path.isfile(os.path.join(root, d, "status.json"))]
+
+
+def read(folder: str) -> tuple[dict, dict]:
+    """(status, benchmark) of one run."""
+    def load(name):
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as fp:
+                return json.load(fp)
+        except (OSError, ValueError):
+            return {}
+
+    return load("status.json"), load("benchmark.json")
