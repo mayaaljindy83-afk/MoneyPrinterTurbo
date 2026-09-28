@@ -25,6 +25,7 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import urllib.parse
@@ -78,13 +79,42 @@ def list_projects() -> list[str]:
                   reverse=True)
 
 
+SITE_CACHE_HOURS = 24  # a live website read is reused for a day; a local build until it is rebuilt
+
+
+def _site_cache_key(url: str, code: str, source_folder: str, route: str) -> str:
+    """Same page + language (+ for a local project: the same build) -> same key."""
+    import hashlib
+
+    parts = [url, code]
+    if source_folder:
+        folder = os.path.abspath(source_folder)
+        marker = next((os.path.join(folder, *m) for m in ((".next", "BUILD_ID"), ("out", "index.html"),
+                                                             ("dist", "index.html"), ("build", "index.html"))
+                       if os.path.isfile(os.path.join(folder, *m))), folder)
+        parts += [folder, route, str(os.path.getmtime(marker)) if os.path.exists(marker) else ""]
+    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:20]
+
+
+def _cached_site(key: str, source_folder: str) -> str:
+    folder = os.path.join(utils.storage_dir("marketing_site_cache", create=True), key)
+    path = os.path.join(folder, "website.json")
+    if not os.path.isfile(path):
+        return ""
+    if not source_folder and time.time() - os.path.getmtime(path) > SITE_CACHE_HOURS * 3600:
+        return ""
+    return folder
+
+
 def analyze(url: str, language: str, duration: float, platform: str, goal: str, presenter: str = "",
             aspect: str = "", focus: str = "", generate=None, read=None, source_folder: str = "",
-            route: str = "/") -> dict:
+            route: str = "/", reuse_site: bool = True) -> dict:
     """Read the page, write the ad plan, save the project. ``read``/``generate`` are for tests.
 
     ``source_folder``: read the page ``route`` from the website's project folder on this laptop
     instead of the internet (``url`` is then only the public address shown in the ad).
+    ``reuse_site``: take the saved reading of the same page (the slow part) when there is one;
+    only the storyboard is written again. A rebuilt local project is read again automatically.
     """
     code = director.language_code(language)
     if source_folder:
@@ -99,7 +129,17 @@ def analyze(url: str, language: str, duration: float, platform: str, goal: str, 
     project_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{host}"[:60]
     folder = project_dir(project_id)
     site_dir = os.path.join(folder, "website")
-    site = (read or website.read_website)(url, site_dir, locale=code)
+    key = _site_cache_key(url, code, source_folder, route)
+    cached = _cached_site(key, source_folder) if reuse_site else ""
+    if cached:
+        shutil.copytree(cached, site_dir, dirs_exist_ok=True)
+        site = website.load_website(site_dir)
+        logger.info(f"website reading reused from {cached}")
+    else:
+        site = (read or website.read_website)(url, site_dir, locale=code)
+        cache_dir = os.path.join(utils.storage_dir("marketing_site_cache", create=True), key)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        shutil.copytree(site_dir, cache_dir)
     plan = director.direct(site, language, duration, platform, goal, focus, generate=generate)
     project = {
         "project_id": project_id, "created": time.time(), "url": url,
@@ -107,7 +147,7 @@ def analyze(url: str, language: str, duration: float, platform: str, goal: str, 
         "goal": goal, "presenter": presenter or profiles.default_presenter(),
         "aspect": aspect or director.platform_aspect(platform), "focus": focus,
         "source": {"folder": source_folder, "route": route} if source_folder else {},
-        "website_dir": site_dir, "plan": plan, "jobs": {},
+        "website_dir": site_dir, "plan": plan, "jobs": {}, "site_reused": bool(cached),
     }
     save_project(project)
     logger.info(f"marketing project {project_id}: {len(plan['scenes'])} scenes, fallback={plan['fallback']}")

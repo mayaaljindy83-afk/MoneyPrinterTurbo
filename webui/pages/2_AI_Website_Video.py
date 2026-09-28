@@ -44,6 +44,11 @@ TEXT = {
     "auto": ("Auto (from platform)", "تلقائي (حسب المنصة)"),
     "focus": ("Service to focus on (optional, for a homepage)", "الخدمة المقصودة (اختياري، إذا الرابط للصفحة الرئيسية)"),
     "analyze": ("ANALYZE", "حلّلي الموقع"),
+    "reread": ("Read the website again", "اقرأي الموقع من جديد"),
+    "reread_help": ("Normally a page read before is reused (fast): only the storyboard is written again. "
+                    "A rebuilt local project is read again automatically.",
+                    "عادةً الصفحة اللي انقرأت قبل بتنعاد استعمالها (أسرع)، وبس القصة بتنكتب من جديد. "
+                    "إذا عملتي build جديد للموقع بينقرأ من جديد لحاله."),
     "make_default": ("Use this presenter for every video", "خلّي هالمقدّمة لكل الفيديوهات"),
     "no_presenter": ("Create your presenter first on the Presenter Video page.",
                      "اعملي المقدّمة أول شي من صفحة Presenter Video."),
@@ -129,6 +134,7 @@ with st.form("analyze_form"):
                                index=presenters.index(default_presenter) if default_presenter in presenters else 0)
     aspect = col6.selectbox(t("aspect"), [t("auto"), "16:9", "9:16"])
     focus = col7.text_input(t("focus"))
+    reread = st.checkbox(t("reread"), value=False, help=t("reread_help"))
     submitted = st.form_submit_button(t("analyze"), type="primary",
                                       disabled=not presenters or (local and not routes))
 if not presenters:
@@ -147,7 +153,8 @@ if submitted and (url.strip() or local):
         try:
             project = pipeline.analyze(url, language, duration, platform.lower(), goal.lower(),
                                        presenter=presenter, aspect="" if aspect == t("auto") else aspect,
-                                       focus=focus, source_folder=folder.strip() if local else "", route=route)
+                                       focus=focus, source_folder=folder.strip() if local else "", route=route,
+                                       reuse_site=not reread)
             st.session_state["web_project"] = project["project_id"]
         except website.WebsiteError as exc:
             st.error(str(exc))

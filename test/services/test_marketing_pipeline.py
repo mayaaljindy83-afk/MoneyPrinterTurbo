@@ -156,6 +156,41 @@ class TestWebsiteAdPipeline(unittest.TestCase):
         self.assertIn(project["project_id"], pipeline.list_projects())
         self.assertEqual(self._analyze(platform="tiktok")["aspect"], "9:16")
 
+    def test_same_page_is_read_once_then_reused(self):
+        reads = []
+
+        def counting_read(url, out_dir, locale="ar"):
+            reads.append(url)
+            return pipeline.website.read_website(url, out_dir, locale=locale)
+
+        first = pipeline.analyze(self.url, "ar", 25, "facebook", "subscriptions", read=counting_read,
+                                 generate=lambda prompt: LLM_ANSWER)
+        second = pipeline.analyze(self.url, "ar", 40, "youtube", "leads", read=counting_read,
+                                  generate=lambda prompt: LLM_ANSWER)
+        self.assertEqual(len(reads), 1)  # the slow part ran once
+        self.assertFalse(first["site_reused"])
+        self.assertTrue(second["site_reused"])
+        site = pipeline.website.load_website(second["website_dir"])
+        shot = site["screenshots"][0]
+        self.assertTrue(os.path.isfile(os.path.join(second["website_dir"], shot["path"])))  # images came along
+        pipeline.analyze(self.url, "ar", 25, "facebook", "subscriptions", read=counting_read,
+                         generate=lambda prompt: LLM_ANSWER, reuse_site=False)
+        self.assertEqual(len(reads), 2)  # "read the website again"
+        pipeline.analyze(self.url, "en", 25, "facebook", "subscriptions", read=counting_read,
+                         generate=lambda prompt: LLM_ANSWER)
+        self.assertEqual(len(reads), 3)  # another language is another reading
+
+    def test_rebuilt_local_project_is_read_again(self):
+        project = os.path.join(self.tmp, "site")
+        os.makedirs(os.path.join(project, ".next"))
+        build_id = os.path.join(project, ".next", "BUILD_ID")
+        with open(build_id, "w") as fp:
+            fp.write("a")
+        key = pipeline._site_cache_key("https://qai-vo.com/x", "ar", project, "/x")
+        self.assertEqual(key, pipeline._site_cache_key("https://qai-vo.com/x", "ar", project, "/x"))
+        os.utime(build_id, (1, 1))
+        self.assertNotEqual(key, pipeline._site_cache_key("https://qai-vo.com/x", "ar", project, "/x"))
+
     def test_scene_mapping(self):
         shots = [pipeline.scene_to_shot({"id": f"s{i}", "type": t, "voiceover": "x"})
                  for i, t in enumerate(["TALK", "WEBSITE_WORLD", "POINT", "CTA", "AI_SCENE", "WEBSITE"])]
