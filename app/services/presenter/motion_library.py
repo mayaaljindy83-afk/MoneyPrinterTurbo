@@ -194,3 +194,90 @@ def prepare(motion: str, duration: float, output: str) -> dict:
 def copy_library(destination: str) -> None:
     """Backup/export of all clips (e.g. to move the library to another drive)."""
     shutil.copytree(root(), destination, dirs_exist_ok=True)
+
+
+# --------------------------------------------------------------------------- AI candidates (option B)
+DRIVE_STYLE = ("the whole upper body and both hands stay inside the frame, clear deliberate gesture, "
+               "plain light grey studio background, static camera, knees-up framing")
+
+# Free stock clips (option C): Pexels videos are free to use; search pages per motion.
+PEXELS_SEARCH = "https://www.pexels.com/search/videos/{}/?orientation=portrait"
+SEARCH_TERMS = {
+    "IDLE_PRESENT": "woman presenting talking", "TALK_CAMERA": "woman talking to camera",
+    "POINT_LEFT": "woman pointing side", "POINT_RIGHT": "woman pointing side", "POINT_UP": "woman pointing up",
+    "POINT_DOWN": "woman pointing down", "PRESENT_LEFT_CARD": "woman presenting open palm",
+    "PRESENT_RIGHT_CARD": "woman presenting open palm", "LOOK_LEFT": "woman looking side",
+    "LOOK_RIGHT": "woman looking side", "TURN_LEFT": "woman turning", "TURN_RIGHT": "woman turning",
+    "WALK_LEFT": "woman walking side", "WALK_RIGHT": "woman walking side", "WALK_FORWARD": "woman walking towards camera",
+    "WALK_AND_STOP": "woman walking stops", "WELCOME": "woman welcoming gesture", "CTA_GESTURE": "woman inviting gesture",
+}
+
+
+def search_link(motion: str) -> str:
+    from urllib.parse import quote
+
+    return PEXELS_SEARCH.format(quote(SEARCH_TERMS.get(motion, motion.lower().replace("_", " "))))
+
+
+def build_candidates_job(job_id: str, presenter, motions: list[str], variants: int = 2, seed: int = 2026) -> dict:
+    """A cloud job making ``variants`` AI driving clips per motion from the presenter photo (Wan I2V).
+
+    Returns the plan (shot id -> motion). Mirror twins are skipped: one side is enough.
+    """
+    from app.services.presenter import package as job_package
+
+    wanted = []
+    for motion in motions:
+        metadata(motion)
+        twin = mirror_name(motion)
+        if twin and twin in wanted:
+            continue
+        wanted.append(motion)
+    root = job_package.job_dir(job_id)
+    package = os.path.join(root, "package")
+    os.makedirs(os.path.join(package, "presenter"), exist_ok=True)
+    refs = []
+    for index, src in enumerate(presenter.reference_images[:1], start=1):
+        name = f"presenter/ref{index}.png"
+        job_package._copy_image(src, os.path.join(package, name))
+        refs.append(name)
+    shots, mapping = [], {}
+    for motion in wanted:
+        meta = metadata(motion)
+        for variant in range(max(1, int(variants))):
+            shot_id = f"m{len(shots) + 1:02d}"
+            mapping[shot_id] = motion
+            shots.append({"id": shot_id, "type": "DRIVE", "duration": float(meta["duration"]),
+                          "action": f"{meta['pose_prompt']}, {DRIVE_STYLE}", "seed": seed + 1000 * variant + len(shots)})
+    job = {"version": job_package.JOB_VERSION, "job_id": job_id, "kind": "video",
+           "settings": {"aspect": "9:16", "seed": seed},
+           "presenter": {"name": presenter.name, "description": presenter.description, "reference_images": refs},
+           "shots": shots}
+    with open(os.path.join(package, "job.json"), "w", encoding="utf-8") as fp:
+        json.dump(job, fp, ensure_ascii=False, indent=2)
+    plan = {"job_id": job_id, "kind": "motion_candidates", "presenter": presenter.name, "motions": mapping}
+    job_package.save_plan(job_id, plan)
+    return plan
+
+
+def candidates(job_id: str) -> list[dict]:
+    """Finished AI candidates of a job: [{"motion", "path", "shot"}]."""
+    from app.services.presenter import package as job_package
+
+    plan = job_package.load_plan(job_id)
+    folder = os.path.join(job_package.job_dir(job_id), "output", "shots")
+    found = []
+    for shot_id, motion in sorted(plan.get("motions", {}).items()):
+        path = os.path.join(folder, f"{shot_id}.mp4")
+        if os.path.isfile(path):
+            found.append({"motion": motion, "path": path, "shot": shot_id})
+    return found
+
+
+def use_candidate(motion: str, path: str) -> str:
+    """Keep an AI candidate as the motion's driving clip (not yet 'tested' until a render proves it)."""
+    return import_clip(motion, path, source_note="AI candidate (Wan I2V)", tested=False)
+
+
+def delete(motion: str) -> None:
+    shutil.rmtree(os.path.join(root(), motion), ignore_errors=True)

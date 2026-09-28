@@ -110,7 +110,9 @@ ANIMATE_MODELS = ["wan_animate_2_int8_convrot.safetensors",
 CREATE_MODELS = ["z_image_turbo_bf16.safetensors", "qwen_3_4b.safetensors", "ae.safetensors"]
 
 TALK_TYPES = {"TALK", "POINT"}
-MOTION_TYPES = {"WALK", "BROLL", "AI_SCENE"}  # AI_SCENE: text-to-image first frame, no presenter
+# AI_SCENE: text-to-image first frame, no presenter. DRIVE: a motion-library candidate, the presenter
+# photo itself as first frame, on a plain background (becomes a driving clip for Wan Animate 2).
+MOTION_TYPES = {"WALK", "BROLL", "AI_SCENE", "DRIVE"}
 ANIMATE_TYPES = {"ANIMATE"}  # presenter photo + driving clip from the motion library (Wan Animate 2)
 ANIMATE_FPS = 30
 ANIMATE_SIZE = (480, 832)  # portrait: the presenter fills the height; keyed and composited on the laptop
@@ -860,7 +862,11 @@ class Worker:
         # ANIMATE shots start from the presenter photo itself: no generated first frame.
         shots = [s for s in self.pending() if not os.path.isfile(self.frame_path(s)) and s["type"] not in ANIMATE_TYPES]
         self.make_ai_frames([s for s in shots if s["type"] == "AI_SCENE"])
-        shots = [s for s in shots if s["type"] != "AI_SCENE"]
+        refs_all = (self.job.get("presenter") or {}).get("reference_images") or []
+        for shot in [s for s in shots if s["type"] == "DRIVE"]:  # no image model needed
+            fit_image(os.path.join(self.root, refs_all[0]), self.frame_path(shot), self.width, self.height)
+            self.progress.set(shot["id"], frame="presenter photo")
+        shots = [s for s in shots if s["type"] not in ("AI_SCENE", "DRIVE")]
         if not shots:
             return
         ensure_models(IMAGE_MODELS, self.comfy.dir, self.cache_dirs)
@@ -1009,10 +1015,11 @@ class Worker:
     def render_motion(self, shot: dict) -> None:
         parts = []
         start = self.frame_path(shot)
+        seed = int(shot.get("seed", self.seed))  # candidates of one motion differ by their own seed
         for index, length in enumerate(motion_chunks(float(shot["duration"]))):
             image_name = stage_input(self.comfy, start, f"start_{shot['id']}_{index}.png")
             graph = build_motion_workflow(image_name, motion_prompt(shot), self.width, self.height, length,
-                                          f"motion_{shot['id']}_{index}", self.seed + index)
+                                          f"motion_{shot['id']}_{index}", seed + index)
             frames = self.comfy.run(graph)
             if index:
                 frames = frames[1:]  # the joining frame is already in the previous part

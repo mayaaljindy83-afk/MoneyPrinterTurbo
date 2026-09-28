@@ -420,6 +420,24 @@ class TestWorkerOrchestration(unittest.TestCase):
             self.assertAlmostEqual(clip.duration, 3, delta=0.1)
             self.assertIsNotNone(clip.audio)
 
+    def test_drive_candidates_use_the_photo_and_their_own_seed(self):
+        self.job["settings"]["aspect"] = "9:16"
+        self.job["shots"] = [{"id": "m01", "type": "DRIVE", "duration": 3, "action": "points left", "seed": 11},
+                             {"id": "m02", "type": "DRIVE", "duration": 3, "action": "points left", "seed": 1011}]
+        with open(os.path.join(self.job_dir, "job.json"), "w") as fp:
+            json.dump(self.job, fp)
+        fake = FakeComfy(os.path.join(self.tmp, "ComfyUI"))
+        with mock.patch.object(pw, "ensure_models"), mock.patch.object(pw, "free_models"):
+            worker = self._worker(fake)
+            worker.make_frames()
+            self.assertEqual(fake.graphs, [])  # the presenter photo is the first frame; no Qwen
+            worker.make_videos()
+            self.assertTrue(pw.summarize(worker)["complete"])
+        seeds = [g["sampler"]["inputs"]["seed"] for g in fake.graphs if "sampler" in g]
+        self.assertEqual(seeds, [11, 1011])
+        with VideoFileClip(os.path.join(self.tmp, "out", "shots", "m01.mp4")) as clip:
+            self.assertEqual(clip.size, [480, 832])
+
     def test_time_budget_stops_before_video(self):
         fake = FakeComfy(os.path.join(self.tmp, "ComfyUI"))
         with mock.patch.object(pw, "ensure_models"), mock.patch.object(pw, "free_models"):

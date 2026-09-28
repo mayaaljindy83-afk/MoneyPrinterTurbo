@@ -151,3 +151,80 @@ class TestPackageCarriesDrivingClip(Case):
         self.assertIn("left side", entry["pose_prompt"])
         frames, _ = frames_of(os.path.join(folder, entry["driving"]))
         self.assertEqual(len(frames), round(entry["duration"] * ml.FPS))
+
+
+class TestAICandidates(Case):
+    def _presenter(self):
+        from PIL import Image
+
+        from app.config import config
+        from app.services.presenter import profiles
+
+        photo = os.path.join(self.tmp, "lina.png")
+        Image.new("RGB", (600, 900), (190, 160, 150)).save(photo)
+        with mock.patch.dict(config.app, {"presenters_dir": ""}):
+            return profiles.save_presenter(profiles.Presenter(name="Lina"), [photo])
+
+    def test_job_has_drive_shots_one_side_only_and_distinct_seeds(self):
+        from app.services.presenter import package as job_package
+
+        plan = ml.build_candidates_job("motions1", self._presenter(), ["POINT_LEFT", "POINT_RIGHT", "WELCOME"], 2)
+        self.assertEqual(sorted(set(plan["motions"].values())), ["POINT_LEFT", "WELCOME"])  # twin skipped
+        with open(os.path.join(job_package.job_dir("motions1"), "package", "job.json"), encoding="utf-8") as fp:
+            job = json.load(fp)
+        self.assertEqual(job["settings"]["aspect"], "9:16")
+        self.assertEqual({s["type"] for s in job["shots"]}, {"DRIVE"})
+        self.assertEqual(len({s["seed"] for s in job["shots"]}), 4)
+        self.assertIn("left side", job["shots"][0]["action"])
+        self.assertEqual(job_package.load_plan("motions1")["kind"], "motion_candidates")
+
+    def test_studio_run_keeps_candidates_and_skips_assembly(self):
+        from app.config import config
+        from app.services.presenter import package as job_package
+        from app.services.presenter import studio
+
+        self._presenter()
+
+        class FakeAgent:
+            def run_job(self, job_id, on_status=None, continuing=False):
+                with open(os.path.join(job_package.job_dir(job_id), "package", "job.json"), encoding="utf-8") as fp:
+                    shots = json.load(fp)["shots"]
+                out = os.path.join(job_package.job_dir(job_id), "output", "shots")
+                os.makedirs(out, exist_ok=True)
+                for shot in shots:
+                    make_clip(os.path.join(out, f"{shot['id']}.mp4"), seconds=1.0, box_left=False)
+                return {"done": len(shots), "total": len(shots), "complete": True}
+
+        with mock.patch.dict(config.app, {"presenters_dir": ""}), \
+                mock.patch.object(studio, "render_final", side_effect=AssertionError("no assembly")):
+            job_id = studio.job_package.new_job_id("motions")
+            ml.build_candidates_job(job_id, __import__("app.services.presenter.profiles", fromlist=["x"])
+                                    .load_presenter("Lina"), ["POINT_RIGHT"], 2)
+            studio._run_on_kaggle(job_id, "", {}, agent=FakeAgent())
+        self.assertEqual(studio.read_status(job_id)["state"], "done")
+        found = ml.candidates(job_id)
+        self.assertEqual([c["motion"] for c in found], ["POINT_RIGHT", "POINT_RIGHT"])
+        ml.use_candidate("POINT_RIGHT", found[1]["path"])
+        self.assertEqual(ml.available()["POINT_LEFT"]["source"], "mirror of POINT_RIGHT")
+        self.assertFalse(ml.load_meta("POINT_RIGHT")["tested"])  # tested only after a good render
+
+    def test_search_links(self):
+        self.assertTrue(ml.search_link("POINT_LEFT").startswith("https://www.pexels.com/search/videos/"))
+        self.assertIn("portrait", ml.search_link("WELCOME"))
+
+
+class TestMotionLibraryPage(Case):
+    def test_page_lists_all_motions_and_needs_a_gpu_service(self):
+        from streamlit.testing.v1 import AppTest
+
+        from app.config import config
+
+        page = os.path.join(os.path.dirname(__file__), "..", "..", "webui", "pages", "3_Motion_Library.py")
+        with mock.patch.dict(config.app, {"presenter_cloud": "kaggle", "kaggle_api_token": ""}):
+            app = AppTest.from_file(page, default_timeout=60)
+            app.run()
+        self.assertFalse(app.exception, app.exception)
+        self.assertEqual(len(app.dataframe[0].value), 18)
+        make = next(b for b in app.button if b.label == "اعملي الفيديوهات")
+        self.assertTrue(make.disabled)
+        self.assertIn("جهّزي Kaggle أو RunPod بصفحة Presenter Video أول.", [i.value for i in app.info])

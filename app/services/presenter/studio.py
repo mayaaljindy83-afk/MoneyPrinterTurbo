@@ -279,9 +279,33 @@ def _run_on_kaggle(job_id: str, token: str, options: dict, agent=None) -> None:
     # Shots finished by an earlier run go up with the job and are not rendered again.
     summary = agent.run_job(job_id, on_status=lambda s: set_status(job_id, kaggle=s),
                             continuing=_has_previous_output(job_id))
+    if is_motion_job(job_id):  # motion-library candidates: nothing to assemble
+        set_status(job_id, "done", f"{summary.get('done', 0)}/{summary.get('total', 0)} motion clips ready",
+                   summary=summary, progress=1.0)
+        return
     set_status(job_id, "rendered", f"{summary.get('done', 0)}/{summary.get('total', 0)} shots rendered",
                summary=summary)
     render_final(job_id, options)
+
+
+def is_motion_job(job_id: str) -> bool:
+    try:
+        return job_package.load_plan(job_id).get("kind") == "motion_candidates"
+    except (OSError, ValueError):
+        return False
+
+
+def start_motion_candidates(motions: list[str], variants: int = 2, token: str = "", agent=None) -> str:
+    """AI driving clips for the motion library, made from the default presenter's photo."""
+    from app.services.presenter import motion_library
+
+    name = profiles.default_presenter() or (profiles.list_presenters() or [""])[0]
+    if not name:
+        raise RuntimeError("Create a presenter first.")
+    job_id = job_package.new_job_id("motions")
+    motion_library.build_candidates_job(job_id, profiles.load_presenter(name), motions, variants)
+    start_kaggle_render(job_id, token, {}, agent=agent)
+    return job_id
 
 
 def start_kaggle_render(job_id: str, token: str, options: dict | None = None, agent=None) -> None:
@@ -344,12 +368,12 @@ def _resume(job_id: str, token: str, options: dict, agent=None) -> None:
     creation = is_creation_job(job_id)
     set_status(job_id, "running", f"continuing: checking {cloud.label()}", error="")
     package_ready = os.path.isfile(os.path.join(job_package.job_dir(job_id), "package", "job.json"))
-    if not creation and not package_ready:
+    if not creation and not package_ready and not is_motion_job(job_id):
         prepare_package(job_id)
     # Continue only fetches: it never starts a new GPU run by itself (max_runs=1 means "the
     # last run only"). Missing shots are reported; rendering them is the user's explicit choice.
     summary = agent.resume(job_id, max_runs=1, on_status=lambda s: set_status(job_id, kaggle=s))
-    if creation:
+    if creation or is_motion_job(job_id):
         set_status(job_id, "done", "candidates ready")
         return
     missing = summary.get("remaining") or []
