@@ -278,6 +278,18 @@ class TestAgent(RunPodCase):
         self.assertIn("download failed", str(ctx.exception))
         self.assertEqual(states[-1], "error")  # "Render" is offered again, not a fetch-only Continue
 
+    def test_run_error_is_shown_even_when_nothing_can_be_fetched(self):
+        job_id = self.make_job()
+        self.handler.VOLUME = os.path.join(self.tmp, "no-volume")  # endpoint without a network volume
+        messages, states = [], []
+        agent = runpod_agent.RunPodAgent(api_key="key", endpoint_id="ep1", session=FakeRunPod(self.handler),
+                                         poll_seconds=0, log=messages.append, sleep=lambda s: None)
+        with self.assertRaises(runpod_agent.RunPodError) as ctx:
+            agent.run_job(job_id, max_runs=1, on_status=states.append)
+        self.assertIn("network volume", str(ctx.exception))
+        self.assertTrue(any(m.startswith("RunPod error:") and "network volume" in m for m in messages))
+        self.assertEqual(states[-1], "error")
+
     def test_partial_run_is_reported_not_rerun_by_continue(self):
         sys.modules["presenter_worker"] = fake_worker({"s01": b"one"})
         job_id = self.make_job()

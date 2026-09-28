@@ -176,6 +176,8 @@ class RunPodAgent:
             if state in FINISHED or state == "NOT_FOUND":
                 output = answer.get("output")
                 error = answer.get("error") or (output.get("error") if isinstance(output, dict) else "") or ""
+                if error:
+                    self.log(f"RunPod error: {str(error)[:800]}")  # shown right away on the page
                 self.last_run = {"state": state, "queue_seconds": (answer.get("delayTime") or 0) / 1000,
                                  "execution_seconds": (answer.get("executionTime") or 0) / 1000,
                                  "gpu": output.get("gpu", "") if isinstance(output, dict) else ""}
@@ -262,7 +264,14 @@ class RunPodAgent:
         state, error = self.wait(request, on_status=on_status)
         if state == "TIMEOUT":
             raise RunPodError("Stopped waiting for RunPod; press Continue later to fetch the result.")
-        summary = self.download(job_id)
+        try:
+            summary = self.download(job_id)
+        except RunPodError as exc:
+            if state != "COMPLETED" or error:  # the run's own error explains more than the fetch
+                if on_status:
+                    on_status("error")
+                raise RunPodError(f"The RunPod run ended ({state}): {error or exc}") from exc
+            raise
         done = bool(summary.get("complete")) or (self._is_presenter_job(job_id) and state in ("COMPLETED", "NOT_FOUND"))
         if done:
             self.log("all shots are ready")
