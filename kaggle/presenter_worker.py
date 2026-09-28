@@ -542,10 +542,17 @@ def ensure_models(names: list[str], comfy_dir: str, cache_dirs: list[str]) -> No
             continue
         log(f"downloading {name} ...")
         started = time.time()
-        partial = target + ".part"
+        store = os.environ.get("MPT_MODEL_STORE", "")  # RunPod network volume: download once, keep
+        kept = os.path.join(store, folder, name) if store else target
+        os.makedirs(os.path.dirname(kept), exist_ok=True)
+        partial = kept + ".part"
         download(url, partial)
-        os.replace(partial, target)
-        log(f"downloaded {name}: {os.path.getsize(target) / 1e9:.1f} GB in {(time.time() - started) / 60:.1f} min")
+        os.replace(partial, kept)
+        if kept != target:
+            if os.path.lexists(target):
+                os.remove(target)
+            os.symlink(kept, target)
+        log(f"downloaded {name}: {os.path.getsize(kept) / 1e9:.1f} GB in {(time.time() - started) / 60:.1f} min")
 
 
 DOWNLOAD_ATTEMPTS = 8

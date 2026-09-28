@@ -396,6 +396,30 @@ class TestModelDownload(unittest.TestCase):
                 pw.download("https://huggingface.co/x/model.safetensors", partial)
             self.assertEqual(len(calls), 1)
 
+    def test_models_kept_on_the_runpod_volume(self):
+        """RunPod: download into the network volume once; later starts link it from there."""
+        name = "clip_vision_h.safetensors"
+        folder = pw.MODELS[name][1]
+
+        def fake_download(url, partial):
+            with open(partial, "wb") as fp:
+                fp.write(b"w" * 2_000_000)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store, comfy = os.path.join(tmp, "volume", "models"), os.path.join(tmp, "comfy")
+            with mock.patch.dict(os.environ, {"MPT_MODEL_STORE": store}), \
+                    mock.patch.object(pw, "download", side_effect=fake_download) as download:
+                pw.ensure_models([name], comfy, [store])
+                target = os.path.join(comfy, "models", folder, name)
+                self.assertTrue(os.path.islink(target))
+                self.assertTrue(os.path.isfile(os.path.join(store, folder, name)))
+                pw.free_models([name], comfy)  # never deletes the kept copy
+                self.assertTrue(os.path.isfile(os.path.join(store, folder, name)))
+                fresh = os.path.join(tmp, "comfy2")  # the next cold start
+                pw.ensure_models([name], fresh, [store])
+                self.assertEqual(download.call_count, 1)
+                self.assertTrue(os.path.islink(os.path.join(fresh, "models", folder, name)))
+
     def test_gives_up_after_all_attempts(self):
         with tempfile.TemporaryDirectory() as tmp:
             fake, calls = self._fake_curl([(10, 92)] * pw.DOWNLOAD_ATTEMPTS)
