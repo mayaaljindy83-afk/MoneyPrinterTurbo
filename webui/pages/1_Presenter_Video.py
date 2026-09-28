@@ -12,7 +12,7 @@ if root_dir not in sys.path:
 
 from app.config import config  # noqa: E402
 from app.services import branding, subtitle_styles, voice  # noqa: E402
-from app.services.presenter import kaggle_agent, profiles, studio  # noqa: E402
+from app.services.presenter import cloud, kaggle_agent, profiles, runpod_agent, studio  # noqa: E402
 from app.services.presenter import package as job_package  # noqa: E402
 from app.utils import utils  # noqa: E402
 
@@ -24,7 +24,17 @@ TEXT = {
               "The heavy AI work runs on Kaggle's free GPU; this laptop plans, records the voice and assembles.",
               "مقدّمة وحدة بنفس الشكل دايماً، بتحكي وبتمشي وبتأشّر وهي عم تشرح موضوعك. الشغل التقيل بيصير "
               "على كرت Kaggle المجاني، واللابتوب بيخطّط وبيسجّل الصوت وبيجمّع الفيديو."),
-    "kaggle": ("1. Kaggle connection", "1. الربط مع Kaggle"),
+    "kaggle": ("1. GPU service (Kaggle / RunPod)", "1. خدمة الـ GPU (Kaggle / RunPod)"),
+    "service": ("Render on", "التوليد على"),
+    "cancel_run": ("Cancel the RunPod run (stops GPU billing)", "إلغاء شغل RunPod (بيوقف الدفع)"),
+    "service_kaggle": ("Kaggle (free, slower)", "Kaggle (مجاني، أبطأ)"),
+    "service_runpod": ("RunPod Serverless (paid, faster)", "RunPod Serverless (مدفوع، أسرع)"),
+    "runpod_key": ("RunPod API key", "مفتاح RunPod API"),
+    "runpod_key_help": ("runpod.io → Settings → API Keys. Saved only in your local config.toml.",
+                        "runpod.io ← Settings ← API Keys. بينحفظ بس بملف config.toml عندك."),
+    "runpod_endpoint": ("RunPod endpoint id", "رقم الـ Endpoint على RunPod"),
+    "runpod_cost": ("RunPod charges for every second a GPU works. Nothing starts until you press Render.",
+                    "RunPod بيحسب كل ثانية بيشتغل فيها الـ GPU. ما في شي بيبلّش إلا لما تكبسي توليد."),
     "token": ("Kaggle API token", "مفتاح Kaggle API"),
     "token_help": ("kaggle.com → Settings → API → Generate New Token. Saved only in your local config.toml.",
                    "من kaggle.com ← Settings ← API ← Generate New Token. بينحفظ بس بملف config.toml عندك."),
@@ -59,6 +69,7 @@ TEXT = {
     "render": ("4. Render", "4. التوليد"),
     "job": ("Job", "المشروع"),
     "run": ("Render on Kaggle (free) and assemble", "ولّدي على Kaggle (ببلاش) وجمّعي الفيديو"),
+    "run_runpod": ("Render on RunPod (paid) and assemble", "ولّدي على RunPod (مدفوع) وجمّعي الفيديو"),
     "assemble": ("Assemble again", "جمّعي الفيديو من جديد"),
     "colab": ("Backup: run on Google Colab by hand", "بديل: شغّلي على Google Colab بإيدك"),
     "download_pkg": ("Download job package (package.zip)", "نزّلي ملف الشغل (package.zip)"),
@@ -68,7 +79,7 @@ TEXT = {
     "intro_outro": ("Add intro/outro", "أضيفي مقدمة وخاتمة"),
     "music": ("Background music", "موسيقى خلفية"),
     "status": ("Status", "الحالة"),
-    "need_token": ("Add your Kaggle token in step 1 first.", "حطّي مفتاح Kaggle بالخطوة 1 أول."),
+    "need_token": ("Set up the GPU service in step 1 first.", "جهّزي خدمة الـ GPU بالخطوة 1 أول."),
     "need_presenter": ("Create a presenter in step 2 first.", "اعملي مقدّمة بالخطوة 2 أول."),
     "ready": ("Your video is ready", "الفيديو جاهز"),
     "interrupted": ("This job stopped on the laptop (it was closed, slept or the drive was removed). The work on "
@@ -98,13 +109,31 @@ if waiting:
     st.warning(f"{t('stopped_jobs')}: " + ", ".join(waiting))
 
 # ----------------------------------------------------------------------------- 1. Kaggle
-with st.expander(t("kaggle"), expanded=not kaggle_agent.configured_token()):
-    token = st.text_input(t("token"), value=kaggle_agent.configured_token(), type="password", help=t("token_help"))
+with st.expander(t("kaggle"), expanded=not cloud.ready()):
+    services = {"kaggle": t("service_kaggle"), "runpod": t("service_runpod")}
+    service = st.radio(t("service"), list(services), format_func=services.get, horizontal=True,
+                       index=list(services).index(cloud.provider()))
+    if service == "runpod":
+        st.caption(t("runpod_cost"))
+        runpod_key = st.text_input(t("runpod_key"), value=runpod_agent.configured_key(), type="password",
+                                   help=t("runpod_key_help"))
+        endpoint = st.text_input(t("runpod_endpoint"), value=runpod_agent.configured_endpoint())
+    else:
+        token = st.text_input(t("token"), value=kaggle_agent.configured_token(), type="password",
+                              help=t("token_help"))
     if st.button(t("save_test")):
-        config.app["kaggle_api_token"] = token.strip()
+        config.app["presenter_cloud"] = service
+        if service == "runpod":
+            config.app["runpod_api_key"] = runpod_key.strip()
+            config.app["runpod_endpoint_id"] = endpoint.strip()
+        else:
+            config.app["kaggle_api_token"] = token.strip()
         config.save_config()
         try:
-            st.success(f"{t('connected')} {kaggle_agent.KaggleAgent(token=token.strip()).check()}")
+            if service == "runpod":
+                st.success(runpod_agent.RunPodAgent().check())  # health check only, no GPU work
+            else:
+                st.success(f"{t('connected')} {kaggle_agent.KaggleAgent(token=token.strip()).check()}")
         except Exception as exc:
             st.error(str(exc))
 
@@ -139,7 +168,7 @@ with col_photo:
         st.image(image, width=220)
 
 with st.expander(t("create_ai")):
-    if st.button(t("create_btn"), disabled=not kaggle_agent.configured_token()):
+    if st.button(t("create_btn"), disabled=not cloud.ready()):
         st.session_state["create_job"] = studio.start_presenter_creation(description, kaggle_agent.configured_token())
     create_job = st.session_state.get("create_job") or next(iter(studio.creation_jobs()), None)
     if create_job:
@@ -148,7 +177,7 @@ with st.expander(t("create_ai")):
         st.code("\n".join(status.get("log", [])[-8:]) or "...")
         if studio.can_continue(create_job):
             st.warning(t("interrupted"))
-            if st.button(t("continue"), key=f"resume_{create_job}", disabled=not kaggle_agent.configured_token()):
+            if st.button(t("continue"), key=f"resume_{create_job}", disabled=not cloud.ready()):
                 studio.start_resume(create_job, kaggle_agent.configured_token())
                 st.rerun()
         elif studio.is_busy(create_job) and status.get("kaggle") in ("running", "queued"):
@@ -227,18 +256,21 @@ if jobs:
     }
     busy = studio.is_busy(job_id)
     col_run, col_again = st.columns(2)
-    if col_run.button(t("run"), type="primary", disabled=busy or not kaggle_agent.configured_token()):
+    if col_run.button(t("run_runpod") if cloud.provider() == "runpod" else t("run"), type="primary", disabled=busy or not cloud.ready()):
         studio.start_kaggle_render(job_id, kaggle_agent.configured_token(), options)
         st.rerun()
-    if not kaggle_agent.configured_token():
+    if not cloud.ready():
         col_run.caption(t("need_token"))
     if col_again.button(t("assemble"), disabled=busy or not studio.rendered_shots(job_id)):
         studio.start_assembly(job_id, options)
         st.rerun()
+    if studio.can_cancel(job_id) and st.button(t("cancel_run"), key=f"cancel_{job_id}"):
+        studio.cancel_cloud_run(job_id)
+        st.rerun()
     if studio.can_continue(job_id):
         st.warning(t("interrupted"))
         if st.button(t("continue"), type="primary", key=f"resume_{job_id}",
-                     disabled=not kaggle_agent.configured_token()):
+                     disabled=not cloud.ready()):
             studio.start_resume(job_id, kaggle_agent.configured_token(), options)
             st.rerun()
 

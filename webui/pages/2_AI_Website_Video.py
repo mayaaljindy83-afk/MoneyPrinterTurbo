@@ -13,7 +13,7 @@ if root_dir not in sys.path:
 from app.config import config  # noqa: E402
 from app.services import subtitle_styles  # noqa: E402
 from app.services.marketing import director, pipeline, website, website_source  # noqa: E402
-from app.services.presenter import kaggle_agent, profiles, studio  # noqa: E402
+from app.services.presenter import cloud, kaggle_agent, profiles, studio  # noqa: E402
 
 st.set_page_config(page_title="AI Website Video", page_icon="🎬", layout="wide")
 
@@ -64,11 +64,12 @@ TEXT = {
     "preview": ("GENERATE 10 SECOND PREVIEW", "ولّدي معاينة 10 ثواني"),
     "full": ("GENERATE FULL VIDEO", "ولّدي الفيديو الكامل"),
     "full_locked": ("Make and watch the preview first.", "اعملي المعاينة وشوفيها أول شي."),
-    "continue": ("Continue (fetch from Kaggle and finish)", "كمّلي (جيبي الشغل من Kaggle وخلّصي)"),
-    "interrupted": ("This video stopped on the laptop. Kaggle kept working; press Continue.",
-                    "هالفيديو وقف عاللابتوب، بس Kaggle ضل شغّال. اضغطي كمّلي."),
-    "need_token": ("Add your Kaggle token on the Presenter Video page (step 1).",
-                   "حطّي مفتاح Kaggle بصفحة Presenter Video (الخطوة 1)."),
+    "continue": ("Continue (fetch the GPU work and finish)", "كمّلي (جيبي الشغل من الـ GPU وخلّصي)"),
+    "interrupted": ("This video stopped on the laptop. The GPU service kept working; press Continue.",
+                    "هالفيديو وقف عاللابتوب، بس خدمة الـ GPU ضلّت شغّالة. اضغطي كمّلي."),
+    "cancel": ("Cancel the RunPod run (stops GPU billing)", "إلغاء شغل RunPod (بيوقف الدفع)"),
+    "need_token": ("Set up Kaggle or RunPod on the Presenter Video page (step 1).",
+                   "جهّزي Kaggle أو RunPod بصفحة Presenter Video (الخطوة 1)."),
     "style": ("Subtitle style", "شكل الترجمة"),
     "music": ("Background music", "موسيقى خلفية"),
     "logo": ("Show logo", "أظهري اللوغو"),
@@ -92,6 +93,7 @@ st.caption(t("intro"))
 
 presenters = profiles.list_presenters()
 token = kaggle_agent.configured_token()
+cloud_ready = cloud.ready()
 
 # ----------------------------------------------------------------------------- inputs
 mode = st.radio(t("source_mode"), [t("mode_url"), t("mode_local")], horizontal=True, key="web_source_mode")
@@ -221,7 +223,7 @@ if projects:
     options["bgm_type"] = "random" if o2.checkbox(t("music"), value=True) else ""
     options["logo"] = o3.checkbox(t("logo"), value=True)
     options["intro_outro"] = o4.checkbox(t("intro_outro"), value=False)
-    if not token:
+    if not cloud_ready:
         st.info(t("need_token"))
 
     def job_panel(mode: str, label: str, locked: bool = False):
@@ -231,11 +233,14 @@ if projects:
         if interrupted:
             st.warning(t("interrupted"))
         if st.button(t("continue") if interrupted else label, type="primary", key=f"{mode}_{project_id}",
-                     disabled=busy or locked or not token):
+                     disabled=busy or locked or not cloud_ready):
             pipeline.start(project_id, mode, token, options)
             st.rerun()
         if locked:
             st.caption(t("full_locked"))
+        if job_id and studio.can_cancel(job_id) and st.button(t("cancel"), key=f"cancel_{mode}_{project_id}"):
+            studio.cancel_cloud_run(job_id)
+            st.rerun()
         if job_id:
             status = studio.read_status(job_id)
             st.write(f"{t('status')}: **{status.get('state')}** {status.get('kaggle', '')}")

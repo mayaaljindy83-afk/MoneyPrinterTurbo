@@ -81,6 +81,20 @@ class TestPresenterPage(unittest.TestCase):
         self.assertTrue(any(plan["job_id"] in w.value for w in app.warning))
         self.assertTrue(any(b.label.startswith("كمّلي") for b in app.button))
 
+    def test_runpod_is_selectable_and_enables_render(self):
+        src = os.path.join(self.tmp, "p.png")
+        Image.new("RGB", (400, 600), (200, 170, 160)).save(src)
+        profiles.save_presenter(profiles.Presenter(name="Lina"), [src])
+        studio.plan_video("t", "Hello there. " * 20, "en-US", "16:9", "Lina")
+        with mock.patch.dict(config.app, {"presenter_cloud": "runpod", "runpod_api_key": "k",
+                                          "runpod_endpoint_id": "ep"}):
+            app = self._app()
+            labels = [t.label for t in app.text_input]
+            self.assertIn("مفتاح RunPod API", labels)
+            self.assertNotIn("مفتاح Kaggle API", labels)
+            run_button = next(b for b in app.button if b.label.startswith("ولّدي على RunPod"))
+            self.assertFalse(run_button.disabled)  # RunPod set up, no Kaggle token needed
+
 
 if __name__ == "__main__":
     unittest.main()

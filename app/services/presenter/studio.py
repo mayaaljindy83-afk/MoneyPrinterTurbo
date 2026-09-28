@@ -21,7 +21,7 @@ from app.models.schema import VideoParams
 from app.services import long_script
 from app.services.presenter import assemble, planner, profiles
 from app.services.presenter import package as job_package
-from app.services.presenter.kaggle_agent import KaggleAgent
+from app.services.presenter import cloud
 
 _threads: dict[str, threading.Thread] = {}
 
@@ -274,8 +274,8 @@ def _has_previous_output(job_id: str) -> bool:
 def _run_on_kaggle(job_id: str, token: str, options: dict, agent=None) -> None:
     if not os.path.isfile(os.path.join(job_package.job_dir(job_id), "package", "job.json")):
         prepare_package(job_id)
-    agent = agent or KaggleAgent(token=token, log=lambda m: set_status(job_id, message=m))
-    set_status(job_id, "running", "sending the job to Kaggle")
+    agent = agent or cloud.make_agent(token, log=lambda m: set_status(job_id, message=m))
+    set_status(job_id, "running", f"sending the job to {cloud.label()}")
     # Shots finished by an earlier run go up with the job and are not rendered again.
     summary = agent.run_job(job_id, on_status=lambda s: set_status(job_id, kaggle=s),
                             continuing=_has_previous_output(job_id))
@@ -298,11 +298,21 @@ def was_interrupted(job_id: str) -> bool:
 
 
 def has_kaggle_run(job_id: str) -> bool:
-    try:
-        with open(os.path.join(job_package.job_dir(job_id), "kaggle.json"), encoding="utf-8") as fp:
-            return bool(json.load(fp).get("kernel"))
-    except (OSError, ValueError):
+    """A cloud run (Kaggle or RunPod) exists for this job."""
+    return cloud.has_run(job_id)
+
+
+def can_cancel(job_id: str) -> bool:
+    """A RunPod run of this job may still be using (and billing) a GPU."""
+    return cloud.last_run_provider(job_id) == "runpod" and read_status(job_id).get("kaggle") in ("queued", "running")
+
+
+def cancel_cloud_run(job_id: str, agent=None) -> bool:
+    """Cancel the job's RunPod request; the waiting thread then reports it as a failed run."""
+    agent = agent or cloud.make_agent(log=lambda m: set_status(job_id, message=m), job_id=job_id)
+    if not hasattr(agent, "cancel"):
         return False
+    return agent.cancel(job_id)
 
 
 def kaggle_run_failed(job_id: str) -> bool:
@@ -330,9 +340,9 @@ def is_creation_job(job_id: str) -> bool:
 
 
 def _resume(job_id: str, token: str, options: dict, agent=None) -> None:
-    agent = agent or KaggleAgent(token=token, log=lambda m: set_status(job_id, message=m))
+    agent = agent or cloud.make_agent(token, log=lambda m: set_status(job_id, message=m), job_id=job_id)
     creation = is_creation_job(job_id)
-    set_status(job_id, "running", "continuing: checking Kaggle", error="")
+    set_status(job_id, "running", f"continuing: checking {cloud.label()}", error="")
     package_ready = os.path.isfile(os.path.join(job_package.job_dir(job_id), "package", "job.json"))
     if not creation and not package_ready:
         prepare_package(job_id)
@@ -365,8 +375,8 @@ def start_assembly(job_id: str, options: dict | None = None) -> None:
 # --------------------------------------------------------------------------- new presenter
 def _create_presenter(job_id: str, token: str, description: str, count: int, agent=None) -> None:
     job_package.build_create_presenter_package(job_id, description, count)
-    agent = agent or KaggleAgent(token=token, log=lambda m: set_status(job_id, message=m))
-    set_status(job_id, "running", "creating presenter photos on Kaggle")
+    agent = agent or cloud.make_agent(token, log=lambda m: set_status(job_id, message=m))
+    set_status(job_id, "running", f"creating presenter photos on {cloud.label()}")
     agent.run_job(job_id, max_runs=1, on_status=lambda s: set_status(job_id, kaggle=s))
     set_status(job_id, "done", "candidates ready")
 
