@@ -22,10 +22,19 @@ TASHKEEL = re.compile("[\u064b-\u0652\u0670]")
 ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩٫٪", "0123456789.%")
 ARABIC_LETTER = re.compile("[\u0621-\u064a]")
 
+# Official brand pronunciation: letter by letter, in every engine and language. Protected:
+# user and project dictionaries cannot change it, and the display text always stays "QAI-VO".
+QAI_VO = {"ar": "كيو إيه آي ڤي أو", "en": "Q A I V O"}
+PROTECTED = {
+    "qai-vo.com": {"ar": QAI_VO["ar"] + " دوت كوم", "en": QAI_VO["en"] + " dot com"},
+    "QAI-VO": QAI_VO,
+    "QAI VO": QAI_VO,
+    "QAIVO": QAI_VO,
+    "QAI_VO": QAI_VO,
+}
+
 # Default spoken forms. Keys match case-insensitively on word boundaries; longer keys win.
 DEFAULT_DICTIONARY = {
-    "QAI-VO": {"ar": "كيو إيه آي فو", "en": "Q A I Vo"},
-    "QAI VO": {"ar": "كيو إيه آي فو", "en": "Q A I Vo"},
     "DOI": {"ar": "دي أو آي", "en": "D O I"},
     "AI": {"ar": "إيه آي", "en": "A I"},
     "API": {"ar": "إيه بي آي", "en": "A P I"},
@@ -170,6 +179,9 @@ class PronunciationProcessor:
         entries = dict(DEFAULT_DICTIONARY if dictionary is None else dictionary)
         entries.update(load_user_dictionary())
         entries.update(overrides or {})
+        protected = {term.lower() for term in PROTECTED}
+        entries = {term: spoken for term, spoken in entries.items() if term.lower() not in protected}
+        entries.update(PROTECTED)
         self.entries = {}
         for term, spoken in entries.items():
             if isinstance(spoken, dict):

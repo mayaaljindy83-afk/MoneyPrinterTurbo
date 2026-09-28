@@ -47,10 +47,10 @@ class TestDictionary(Case):
         display = "مع QAI-VO تتحقق من روابط DOI بالـ AI."
         result = PronunciationProcessor("ar").process(display)
         self.assertEqual(result.display, display)  # the shown text never changes
-        self.assertEqual(result.spoken, "مع كيو إيه آي فو تتحقق من روابط دي أو آي بالـ إيه آي.")
+        self.assertEqual(result.spoken, "مع كيو إيه آي ڤي أو تتحقق من روابط دي أو آي بالـ إيه آي.")
         self.assertEqual([r["term"] for r in result.replacements], ["QAI-VO", "DOI", "AI"])
         english = PronunciationProcessor("en").process("QAI-VO finds DOI links with AI")
-        self.assertEqual(english.spoken, "Q A I Vo finds D O I links with A I.")
+        self.assertEqual(english.spoken, "Q A I V O finds D O I links with A I.")
 
     def test_ai_inside_words_is_not_replaced(self):
         self.assertEqual(PronunciationProcessor("en").process("Said the email").spoken, "Said the email.")
@@ -58,9 +58,33 @@ class TestDictionary(Case):
     def test_project_overrides_and_user_file(self):
         with open(pr.user_dictionary_path(), "w", encoding="utf-8") as fp:
             json.dump({"Academic Suite": {"ar": "الحقيبة الأكاديمية"}}, fp, ensure_ascii=False)
-        processor = PronunciationProcessor("ar", overrides={"QAI-VO": "كاي فو"})
-        spoken = processor.process("QAI-VO Academic Suite").spoken
-        self.assertEqual(spoken, "كاي فو الحقيبة الأكاديمية.")
+        processor = PronunciationProcessor("ar", overrides={"Gemini": "جيمناي"})
+        spoken = processor.process("Gemini Academic Suite").spoken
+        self.assertEqual(spoken, "جيمناي الحقيبة الأكاديمية.")
+
+    def test_qai_vo_is_protected_in_every_form(self):
+        """Official pronunciation, letter by letter; no dictionary can change it."""
+        with open(pr.user_dictionary_path(), "w", encoding="utf-8") as fp:
+            json.dump({"QAI-VO": "كاي فو", "qaivo": "كايفو"}, fp, ensure_ascii=False)
+        overrides = {"QAI-VO": {"ar": "قاي فو", "en": "Kai Vo"}, "QAI VO": "x"}
+        for display in ("QAI-VO", "qai-vo", "Qai-Vo", "QAI VO", "QAIVO"):
+            arabic = PronunciationProcessor("ar", overrides=overrides).process(f"منصة {display} للباحثين")
+            self.assertEqual(arabic.spoken, "منصة كيو إيه آي ڤي أو للباحثين.", display)
+            self.assertEqual(arabic.display, f"منصة {display} للباحثين")
+            self.assertEqual(arabic.unknown_terms, [])
+            english = PronunciationProcessor("en", overrides=overrides).process(f"Try {display} today")
+            self.assertEqual(english.spoken, "Try Q A I V O today.", display)
+        site = PronunciationProcessor("ar").process("زوروا qai-vo.com اليوم")
+        self.assertEqual(site.spoken, "زوروا كيو إيه آي ڤي أو دوت كوم اليوم.")
+        # Every engine gets the same spoken form, whatever its number setting.
+        for numbers in ("words", "keep"):
+            self.assertIn("كيو إيه آي ڤي أو", PronunciationProcessor("ar", numbers=numbers).process("QAI-VO").spoken)
+
+    def test_tashkeel_cannot_change_the_brand(self):
+        marked = PronunciationProcessor("ar", diacritizer=lambda t: t.replace("ڤي أو", "ڤِي أُو")).process("QAI-VO")
+        self.assertEqual(pr.strip_tashkeel(marked.spoken), "كيو إيه آي ڤي أو.")
+        swapped = PronunciationProcessor("ar", diacritizer=lambda t: t.replace("ڤي", "في")).process("QAI-VO")
+        self.assertEqual(swapped.spoken, "كيو إيه آي ڤي أو.")  # a changed letter is rejected
 
     def test_unknown_latin_terms_are_flagged(self):
         result = PronunciationProcessor("ar").process("جرّب ChatGPT وScopus.")
