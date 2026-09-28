@@ -165,6 +165,81 @@ class TestWorkflows(unittest.TestCase):
         self.assertEqual(pw.motion_prompt({}), "Natural smooth motion.")
 
 
+# Input names of the ComfyUI v0.37.4 core nodes the Wan Animate 2 graph uses (from the node sources).
+NODE_INPUTS = {
+    "WanAnimate2ToVideo": {"positive", "negative", "vae", "width", "height", "length", "batch_size",
+                           "reference_image", "pose_video", "clip_vision_output", "positive_pose",
+                           "clip_vision_output_pose", "continue_motion", "video_frame_offset", "pose_strength",
+                           "pose_start_percent", "pose_end_percent", "reference_image_strength"},
+    "WanAnimate2Cache": {"model", "device", "dtype"},
+    "LoadVideo": {"file"},
+    "GetVideoComponents": {"video"},
+    "TrimVideoLatent": {"samples", "trim_amount"},
+    "ImageFromBatch": {"image", "batch_index", "length"},
+    "SamplerCustom": {"model", "add_noise", "noise_seed", "cfg", "positive", "negative", "sampler", "sigmas",
+                      "latent_image"},
+    "KSamplerSelect": {"sampler_name"},
+    "BasicScheduler": {"model", "scheduler", "steps", "denoise"},
+    "ModelSamplingSD3": {"model", "shift"},
+    "CLIPVisionEncode": {"clip_vision", "image", "crop"},
+}
+
+
+class TestAnimateWorkflow(unittest.TestCase):
+    def test_segments_cover_frames_with_legal_lengths(self):
+        self.assertEqual(pw.animate_segments(81), [81])
+        self.assertEqual(pw.animate_segments(60), [61])
+        self.assertEqual(pw.animate_segments(300), [81, 81, 81, 61])
+        for frames in (1, 30, 81, 82, 150, 161, 300, 450):
+            lengths = pw.animate_segments(frames)
+            self.assertTrue(all(n % 4 == 1 and n <= 81 for n in lengths), lengths)
+            made = lengths[0] + sum(n - 1 for n in lengths[1:])  # joins repeat one frame
+            self.assertGreaterEqual(made, frames)
+            self.assertLess(made - frames, 4 + 1)
+
+    def test_graph_matches_official_template_and_node_inputs(self):
+        g = pw.build_animate_workflow("ref.png", "drive.mp4", "Character Description: x", "a woman points left",
+                                      480, 832, 300, "animate_s01", 7)
+        _links_are_valid(self, g)
+        for node in g.values():
+            known = NODE_INPUTS.get(node["class_type"])
+            if known:
+                self.assertLessEqual(set(node["inputs"]), known, node["class_type"])
+        # Template settings: lightx2v, 6 steps, lcm, shift 5, cfg 1.
+        self.assertEqual(g["sigmas"]["inputs"]["steps"], 6)
+        self.assertEqual(g["sampler_select"]["inputs"]["sampler_name"], "lcm")
+        self.assertEqual(g["shift"]["inputs"]["shift"], 5.0)
+        self.assertEqual(g["a0_sample"]["inputs"]["cfg"], 1.0)
+        # Chunks chain: continue from the frames so far, pose video continues where the last chunk ended.
+        self.assertNotIn("continue_motion", g["a0_anim"]["inputs"])
+        self.assertEqual(g["a1_anim"]["inputs"]["continue_motion"], ["a0_decode", 0])
+        self.assertEqual(g["a1_anim"]["inputs"]["video_frame_offset"], ["a0_anim", 5])
+        self.assertEqual(g["a2_anim"]["inputs"]["video_frame_offset"], ["a1_anim", 5])
+        self.assertEqual(g["a1_new"]["inputs"]["batch_index"], ["a1_anim", 4])  # joining frame dropped
+        self.assertEqual(g["a3_anim"]["inputs"]["length"], 61)
+        self.assertEqual(g["exact"]["inputs"]["length"], 300)
+        self.assertEqual(g["save"]["inputs"]["images"], ["exact", 0])
+        for node in g.values():
+            for key in ("unet_name", "lora_name", "clip_name", "vae_name"):
+                if key in node["inputs"]:
+                    self.assertIn(node["inputs"][key], pw.MODELS)
+        self.assertEqual(set(pw.ANIMATE_MODELS) - set(pw.MODELS), set())
+
+    def test_prompt_has_looks_and_green_background_but_no_motion(self):
+        prompt = pw.animate_prompt({"description": "a woman in a navy blazer"})
+        self.assertIn("navy blazer", prompt)
+        self.assertIn("#00FF00", prompt)
+        self.assertNotIn("point", prompt.lower())
+
+    def test_animate_shot_needs_a_driving_clip(self):
+        job = {"job_id": "j", "presenter": {"reference_images": ["r.png"]},
+               "shots": [{"id": "s01", "type": "ANIMATE", "duration": 3, "audio": "a.mp3"}]}
+        with self.assertRaises(SystemExit):
+            pw.validate_job(job)
+        job["shots"][0]["driving"] = "motions/s01.mp4"
+        pw.validate_job(job)
+
+
 class TestMediaHelpers(unittest.TestCase):
     def test_fit_image_crop_and_pad(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -236,6 +311,10 @@ class FakeComfy:
             talk = graph["s0_talk"]["inputs"]
             segments = sum(1 for k in graph if k.endswith("_talk"))
             count, size = 81 + (segments - 1) * 72, (talk["width"], talk["height"])
+        elif "exact" in graph:  # Wan Animate 2
+            anim = graph["a0_anim"]["inputs"]
+            count, size = graph["exact"]["inputs"]["length"], (anim["width"], anim["height"])
+            assert os.path.isfile(os.path.join(self.input_dir, graph["drive_file"]["inputs"]["file"]))
         elif "i2v" in graph:
             i2v = graph["i2v"]["inputs"]
             count, size = i2v["length"], (i2v["width"], i2v["height"])
@@ -315,6 +394,31 @@ class TestWorkerOrchestration(unittest.TestCase):
         with VideoFileClip(os.path.join(out, "shots", "s02.mp4")) as clip:
             self.assertAlmostEqual(clip.duration, 6, delta=0.15)
             self.assertEqual(clip.size, [832, 480])
+
+    def test_animate_shot_renders_portrait_30fps_without_first_frame(self):
+        os.makedirs(os.path.join(self.job_dir, "motions"))
+        subprocess.run([FFMPEG, "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=480x832:rate=30:duration=3",
+                        "-pix_fmt", "yuv420p", os.path.join(self.job_dir, "motions", "s04.mp4")], check=True)
+        self.job["shots"] = [{"id": "s04", "type": "ANIMATE", "duration": 3, "audio": "audio/s01.mp3",
+                              "driving": "motions/s04.mp4", "pose_prompt": "a woman points left", "green": True}]
+        with open(os.path.join(self.job_dir, "job.json"), "w") as fp:
+            json.dump(self.job, fp)
+        fake = FakeComfy(os.path.join(self.tmp, "ComfyUI"))
+        with mock.patch.object(pw, "ensure_models") as models, mock.patch.object(pw, "free_models"):
+            worker = self._worker(fake)
+            worker.make_frames()
+            self.assertEqual(fake.graphs, [])  # no Qwen first frame for ANIMATE
+            worker.make_videos()
+            self.assertTrue(pw.summarize(worker)["complete"])
+        self.assertEqual(models.call_args[0][0], pw.ANIMATE_MODELS)  # no InfiniteTalk / I2V downloads
+        graph = fake.graphs[0]
+        self.assertEqual(graph["pose_text"]["inputs"]["text"], "a woman points left")
+        self.assertIn("a young woman", graph["pos"]["inputs"]["text"])
+        with VideoFileClip(os.path.join(self.tmp, "out", "shots", "s04.mp4")) as clip:
+            self.assertEqual(clip.size, [480, 832])
+            self.assertAlmostEqual(clip.fps, 30, delta=0.1)
+            self.assertAlmostEqual(clip.duration, 3, delta=0.1)
+            self.assertIsNotNone(clip.audio)
 
     def test_time_budget_stops_before_video(self):
         fake = FakeComfy(os.path.join(self.tmp, "ComfyUI"))
