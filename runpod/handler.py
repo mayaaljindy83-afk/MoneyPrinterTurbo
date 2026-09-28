@@ -13,6 +13,7 @@ Requests (``input``):
 * ``{"mode": "list", "job_id"}`` -> summary, progress, file list, last log lines.
 * ``{"mode": "fetch", "job_id", "path", "offset", "length"}`` -> one piece of a file (base64).
 * ``{"mode": "cleanup", "job_id"}`` -> delete the job's folder once the laptop has everything.
+* ``{"mode": "tts", "engine": "silma", "items": [...]}`` -> short speech clips (see ``tts``).
 """
 
 from __future__ import annotations
@@ -175,6 +176,52 @@ def cleanup(job_id: str) -> dict:
     return {"job_id": job_id, "deleted": True}
 
 
+SILMA_PYTHON = os.environ.get("MPT_SILMA_PYTHON", "/opt/silma/bin/python")
+TTS_ENGINES = {"silma": os.path.join(HERE, "tts_silma.py")}
+MAX_TTS_ITEMS = 12
+
+
+def tts(inp: dict) -> dict:
+    """Short speech clips (Voice Lab, narration): {"engine", "items": [{"id", "text", "ref_wav" (base64 WAV),
+    "ref_text", "speed", "seed"}]} -> {"items": [{"id", "wav" (base64), "seconds", ...}], timings}."""
+    import subprocess
+    import tempfile
+
+    engine = str(inp.get("engine", ""))
+    if engine not in TTS_ENGINES:
+        raise HandlerError(f"unknown tts engine {engine!r}")
+    items = list(inp.get("items") or [])[:MAX_TTS_ITEMS]
+    work = tempfile.mkdtemp(prefix="tts_")
+    request = []
+    for index, item in enumerate(items):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", str(item.get("id", ""))):
+            raise HandlerError(f"bad item id: {item.get('id')!r}")
+        entry = {k: item.get(k) for k in ("id", "text", "ref_text", "speed", "seed")}
+        if item.get("ref_wav"):
+            ref = os.path.join(work, f"ref_{index}.wav")
+            with open(ref, "wb") as fp:
+                fp.write(base64.b64decode(item["ref_wav"]))
+            entry["ref_wav"] = ref
+        request.append(entry)
+    with open(os.path.join(work, "request.json"), "w", encoding="utf-8") as fp:
+        json.dump({"items": request}, fp, ensure_ascii=False)
+    env = dict(os.environ)
+    cache = os.path.join(VOLUME, "hf") if os.path.isdir(VOLUME) else os.path.join(work, "hf")
+    env.update({"HF_HOME": cache, "PYTHONUTF8": "1"})
+    out = os.path.join(work, "out")
+    run = subprocess.run([SILMA_PYTHON, TTS_ENGINES[engine], os.path.join(work, "request.json"), out],
+                         capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+    if run.returncode:
+        raise HandlerError(f"{engine} failed: {(run.stderr or run.stdout)[-1500:]}")
+    result = _read_json(os.path.join(out, "result.json"))
+    for item in result.get("items", []):
+        with open(os.path.join(out, item.pop("file")), "rb") as fp:
+            item["wav"] = base64.b64encode(fp.read()).decode("ascii")
+    result["gpu"] = gpu_name()
+    shutil.rmtree(work, ignore_errors=True)
+    return result
+
+
 def handler(job: dict, progress=None) -> dict:
     inp = job.get("input") or {}
     mode = inp.get("mode", "render")
@@ -187,6 +234,8 @@ def handler(job: dict, progress=None) -> dict:
             return fetch(inp)
         if mode == "cleanup":
             return cleanup(_job_id(inp.get("job_id")))
+        if mode == "tts":
+            return tts(inp)
         raise HandlerError(f"unknown mode {mode!r}")
     except (HandlerError, OSError, ValueError, KeyError) as exc:
         return {"error": str(exc)}
