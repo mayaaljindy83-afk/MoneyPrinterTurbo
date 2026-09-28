@@ -186,7 +186,8 @@ def prepare_package(job_id: str, tts=None) -> str:
     set_status(job_id, "preparing", "recording the narration")
     folder = job_package.build_package(
         job_id, presenter, plan["shots"], {"aspect": plan["aspect"], "language": plan["language"]}, places, tts=tts,
-        progress=lambda done, total: set_status(job_id, progress=done / total * 0.1))
+        progress=lambda done, total: set_status(job_id, progress=done / total * 0.1),
+        voice_style=plan.get("voice_style"))
     job_package.save_plan(job_id, plan)  # durations were added to the shots
     return folder
 

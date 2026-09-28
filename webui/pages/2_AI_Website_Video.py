@@ -72,6 +72,18 @@ TEXT = {
     "continue": ("Continue (fetch the GPU work and finish)", "كمّلي (جيبي الشغل من الـ GPU وخلّصي)"),
     "interrupted": ("This video stopped on the laptop. The GPU service kept working; press Continue.",
                     "هالفيديو وقف عاللابتوب، بس خدمة الـ GPU ضلّت شغّالة. اضغطي كمّلي."),
+    "voice": ("Voice", "الصوت"),
+    "voice_help": ("The same five setups as the Voice Lab. Remembered for the next video in this language. "
+                   "A new voice means the presenter is rendered again (her lips follow the audio).",
+                   "نفس الخمس طرق تبع مختبر الأصوات. بيتذكّرها للفيديو الجاي بنفس اللغة. "
+                   "صوت جديد يعني المقدّمة بتنعمل من جديد (شفافها بتمشي مع الصوت)."),
+    "voice_edge_plain": ("Edge (as written)", "Edge (متل ما هو)"),
+    "voice_edge_fixed": ("Edge + pronunciation fixes", "Edge + تصحيح اللفظ"),
+    "voice_edge_tashkeel": ("Edge + fixes + tashkeel", "Edge + تصحيح + تشكيل"),
+    "voice_silma": ("SILMA (its voice)", "SILMA (صوته)"),
+    "voice_silma_lina": ("SILMA with Lina's voice", "SILMA بصوت لينا"),
+    "voice_needs_runpod": ("SILMA runs on RunPod: set RunPod up on the Presenter Video page.",
+                           "SILMA بيشتغل على RunPod: جهّزي RunPod بصفحة Presenter Video."),
     "cancel": ("Cancel the RunPod run (stops GPU billing)", "إلغاء شغل RunPod (بيوقف الدفع)"),
     "need_token": ("Set up Kaggle or RunPod on the Presenter Video page (step 1).",
                    "جهّزي Kaggle أو RunPod بصفحة Presenter Video (الخطوة 1)."),
@@ -230,6 +242,18 @@ if projects:
     options["bgm_type"] = "random" if o2.checkbox(t("music"), value=True) else ""
     options["logo"] = o3.checkbox(t("logo"), value=True)
     options["intro_outro"] = o4.checkbox(t("intro_outro"), value=False)
+    from app.services.speech import narration
+
+    styles = list(narration.STYLES)
+    current_style = pipeline.voice_style(project)
+    chosen_style = st.selectbox(t("voice"), styles, index=styles.index(current_style),
+                                format_func=lambda s: t(f"voice_{s}"), help=t("voice_help"),
+                                key=f"voice_{project_id}")
+    if chosen_style != current_style:
+        pipeline.set_voice_style(project_id, chosen_style)
+        st.rerun()
+    if chosen_style.startswith("silma") and not cloud.ready():
+        st.warning(t("voice_needs_runpod"))
     if not cloud_ready:
         st.info(t("need_token"))
 

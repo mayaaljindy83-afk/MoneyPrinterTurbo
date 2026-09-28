@@ -38,7 +38,12 @@ def jobs_root() -> str:
 
 def new_job_id(topic: str = "") -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", (topic or "").lower()).strip("-")[:24]
-    return f"{time.strftime('%Y%m%d-%H%M%S')}{'-' + slug if slug else ''}"
+    base = f"{time.strftime('%Y%m%d-%H%M%S')}{'-' + slug if slug else ''}"
+    job_id, n = base, 1
+    while os.path.exists(os.path.join(jobs_root(), job_id)):  # two jobs in the same second
+        n += 1
+        job_id = f"{base}-{n}"
+    return job_id
 
 
 def job_dir(job_id: str) -> str:
@@ -78,7 +83,7 @@ def _copy_image(src: str, dst: str, max_side: int = 1600) -> None:
 
 
 def record_narration(shot: dict, audio_file: str, subtitle_file: str, voice_name: str, voice_rate: float,
-                     tts=None) -> float:
+                     tts=None, style: str | None = None) -> float:
     """TTS one shot; returns its duration in seconds.
 
     The voice reads the SPOKEN form (PronunciationProcessor: QAI-VO letter by letter, acronyms,
@@ -87,7 +92,23 @@ def record_narration(shot: dict, audio_file: str, subtitle_file: str, voice_name
     from app.services.speech import narration
 
     tts = tts or voice.tts
-    prepared = narration.prepare(shot["narration"], narration.processor_for(voice_name))
+    if style == "edge_plain":
+        processor = None
+    elif style:
+        processor = narration.processor_for_style(voice_name, style)
+    else:
+        processor = narration.processor_for(voice_name)
+    if processor is None:  # the text exactly as written
+        sub_maker = tts(text=shot["narration"], voice_name=voice_name, voice_rate=voice_rate, voice_file=audio_file)
+        if sub_maker is None or not os.path.isfile(audio_file):
+            raise RuntimeError(f"text to speech failed for shot {shot['id']}")
+        shot["spoken"] = shot["narration"]
+        try:
+            voice.create_subtitle(sub_maker=sub_maker, text=shot["narration"], subtitle_file=subtitle_file)
+        except Exception as exc:
+            logger.warning(f"subtitle for shot {shot['id']} failed: {exc}")
+        return round(float(voice.get_audio_duration(audio_file) or voice.get_audio_duration(sub_maker)), 3)
+    prepared = narration.prepare(shot["narration"], processor)
     shot["spoken"] = prepared["spoken"]
     if prepared["unknown_terms"]:
         logger.info(f"shot {shot['id']}: no pronunciation entry for {', '.join(prepared['unknown_terms'])}")
@@ -105,8 +126,49 @@ def record_narration(shot: dict, audio_file: str, subtitle_file: str, voice_name
     return round(float(duration), 3)
 
 
+def record_silma(shots: list[dict], package: str, subtitles: str, voice_name: str, style: str, tts=None,
+                 agent=None) -> dict[str, float]:
+    """Narration of all shots with SILMA on the RunPod endpoint, in one request. ``silma_lina``
+    copies the presenter's Edge voice from a short reference clip. Returns {shot id: seconds}."""
+    import base64
+    import subprocess
+
+    from app.services.speech import narration, voice_lab
+
+    processor = narration.processor_for_style(voice_name, style)
+    language = narration.language_of(voice_name)
+    items, prepared = [], {}
+    for shot in shots:
+        prepared[shot["id"]] = narration.prepare(shot["narration"], processor)
+        shot["spoken"] = prepared[shot["id"]]["spoken"]
+        items.append({"id": shot["id"], "text": shot["spoken"]})
+    if style == "silma_lina":
+        reference = os.path.join(package, "voice_reference.wav")
+        voice_lab.edge(voice_lab.REFERENCE_TEXT[language], language, reference, tts)
+        for item in items:
+            item.update({"ref_wav": reference, "ref_text": voice_lab.REFERENCE_TEXT[language]})
+    answer = voice_lab.silma(items, agent)
+    durations = {}
+    for item in answer.get("items", []):
+        wav = os.path.join(package, "audio", f"{item['id']}.wav")
+        with open(wav, "wb") as fp:
+            fp.write(base64.b64decode(item["wav"]))
+        mp3 = os.path.join(package, "audio", f"{item['id']}.mp3")
+        subprocess.run([utils.get_ffmpeg_binary(), "-loglevel", "error", "-y", "-i", wav, "-b:a", "192k", mp3],
+                       check=True)
+        os.remove(wav)
+        durations[item["id"]] = round(float(voice.get_audio_duration(mp3)), 3)
+        narration.write_even_srt(prepared[item["id"]]["lines"], durations[item["id"]],
+                                 os.path.join(subtitles, f"{item['id']}.srt"))
+    missing = [s["id"] for s in shots if s["id"] not in durations]
+    if missing:
+        raise RuntimeError(f"SILMA returned no audio for {', '.join(missing)}")
+    return durations
+
+
 def build_package(job_id: str, presenter: Presenter, shots: list[dict], settings: dict,
-                  places: dict[str, dict] | None = None, tts=None, progress=None) -> str:
+                  places: dict[str, dict] | None = None, tts=None, progress=None, voice_style: str | None = None,
+                  agent=None) -> str:
     """Record the narration and write ``package/`` for the worker. Returns the package folder.
 
     ``places`` maps a place name (as used in ``shot["place"]``) to
@@ -128,12 +190,23 @@ def build_package(job_id: str, presenter: Presenter, shots: list[dict], settings
 
     location_files: dict[str, str] = {}
     job_shots = []
+    silma_durations: dict[str, float] = {}
+    if voice_style and voice_style.startswith("silma"):
+        todo = [s for s in shots if not (os.path.isfile(os.path.join(package, "audio", f"{s['id']}.mp3"))
+                                         and s.get("duration"))]
+        if todo:
+            silma_durations = record_silma(todo, package, os.path.join(root, "subtitles"), presenter.voice_name,
+                                           voice_style, tts=tts, agent=agent)
     for index, shot in enumerate(shots):
         audio_name = f"audio/{shot['id']}.mp3"
         audio_path = os.path.join(package, audio_name)
         srt_path = os.path.join(root, "subtitles", f"{shot['id']}.srt")
         if not (os.path.isfile(audio_path) and shot.get("duration")):
-            spoken = record_narration(shot, audio_path, srt_path, presenter.voice_name, presenter.voice_rate, tts)
+            if shot["id"] in silma_durations:
+                spoken = silma_durations[shot["id"]]
+            else:
+                spoken = record_narration(shot, audio_path, srt_path, presenter.voice_name, presenter.voice_rate,
+                                          tts, style=voice_style)
             # ``min_duration``: the storyboard length; the picture holds after the narration ends.
             shot["duration"] = round(max(spoken, float(shot.get("min_duration") or 0)), 3)
         entry = {k: shot[k] for k in ("id", "type", "narration", "spoken", "location", "action", "camera",

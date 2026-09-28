@@ -191,6 +191,21 @@ class TestWebsiteAdPipeline(unittest.TestCase):
         os.utime(build_id, (1, 1))
         self.assertNotEqual(key, pipeline._site_cache_key("https://qai-vo.com/x", "ar", project, "/x"))
 
+    def test_voice_choice_goes_into_the_job_and_a_new_voice_means_a_new_render(self):
+        with mock.patch.object(config, "save_config"):
+            project = self._analyze()
+            pid = project["project_id"]
+            first = pipeline.create_job(pid, "preview")
+            self.assertEqual(job_package.load_plan(first)["voice_style"], pipeline.voice_style(project))
+            pipeline.set_voice_style(pid, "edge_tashkeel")
+            self.assertEqual(config.app["voice_style_ar"], "edge_tashkeel")  # default for the next video
+            fake = FakeKaggle()
+            with mock.patch.object(studio, "start_kaggle_render") as render:
+                job_id = pipeline.start(pid, "preview", "token", {}, agent=fake)
+            self.assertNotEqual(job_id, first)
+            self.assertEqual(job_package.load_plan(job_id)["voice_style"], "edge_tashkeel")
+            render.assert_called_once()
+
     def test_scene_mapping(self):
         shots = [pipeline.scene_to_shot({"id": f"s{i}", "type": t, "voiceover": "x"})
                  for i, t in enumerate(["TALK", "WEBSITE_WORLD", "POINT", "CTA", "AI_SCENE", "WEBSITE"])]
