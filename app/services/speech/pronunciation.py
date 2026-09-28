@@ -25,6 +25,26 @@ ARABIC_LETTER = re.compile("[\u0621-\u064a]")
 # Official brand pronunciation: letter by letter, in every engine and language. Protected:
 # user and project dictionaries cannot change it, and the display text always stays "QAI-VO".
 QAI_VO = {"ar": "كيو إيه آي ڤي أو", "en": "Q A I V O"}
+# How the TEXT sent to a voice can be written so that it SOUNDS like the official pronunciation
+# (e.g. Edge's Arabic voice cannot say "ڤ"). Chosen by ear in the Voice Lab, saved in config.toml
+# as qai_vo_spoken_ar / qai_vo_spoken_en; the display text is always "QAI-VO".
+BRAND_VARIANTS = {
+    "ar": ["كيو إيه آي ڤي أو", "كيو إيه آي في أو", "كيو إيه آي فِي أُو", "كيو، إيه، آي، في، أو",
+           "Q A I V O"],
+    "en": ["Q A I V O", "Q.A.I. V.O.", "Q-A-I V-O", "Queue A I Vee Oh"],
+}
+
+
+def brand_spoken(language: str) -> str:
+    try:
+        from app.config import config
+
+        chosen = str(config.app.get(f"qai_vo_spoken_{language}", "") or "").strip()
+    except Exception:
+        chosen = ""
+    return chosen or QAI_VO[language]
+
+
 PROTECTED = {
     "qai-vo.com": {"ar": QAI_VO["ar"] + " دوت كوم", "en": QAI_VO["en"] + " dot com"},
     "QAI-VO": QAI_VO,
@@ -35,15 +55,16 @@ PROTECTED = {
 
 # Default spoken forms. Keys match case-insensitively on word boundaries; longer keys win.
 DEFAULT_DICTIONARY = {
-    "DOI": {"ar": "دي أو آي", "en": "D O I"},
-    "AI": {"ar": "إيه آي", "en": "A I"},
-    "API": {"ar": "إيه بي آي", "en": "A P I"},
-    "APA": {"ar": "إيه بي إيه", "en": "A P A"},
-    "MLA": {"ar": "إم إل إيه", "en": "M L A"},
-    "PDF": {"ar": "بي دي إف", "en": "P D F"},
-    "OpenAI": {"ar": "أوبن إيه آي", "en": "Open A I"},
-    "Gemini": {"ar": "جيميناي", "en": "Gemini"},
-    "Academic Suite": {"ar": "أكاديميك سويت", "en": "Academic Suite"},
+    # English voices read these as written (the Voice Lab showed that spelling them out sounds worse).
+    "DOI": {"ar": "دي أو آي"},
+    "AI": {"ar": "إيه آي"},
+    "API": {"ar": "إيه بي آي"},
+    "APA": {"ar": "إيه بي إيه"},
+    "MLA": {"ar": "إم إل إيه"},
+    "PDF": {"ar": "بي دي إف"},
+    "OpenAI": {"ar": "أوبن إيه آي"},
+    "Gemini": {"ar": "جيميناي"},
+    "Academic Suite": {"ar": "أكاديميك سويت"},
 }
 
 _ONES = ["صفر", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة"]
@@ -182,10 +203,15 @@ class PronunciationProcessor:
         protected = {term.lower() for term in PROTECTED}
         entries = {term: spoken for term, spoken in entries.items() if term.lower() not in protected}
         entries.update(PROTECTED)
+        brand = brand_spoken(self.language)
         self.entries = {}
         for term, spoken in entries.items():
-            if isinstance(spoken, dict):
-                spoken = spoken.get(self.language) or spoken.get("en") or ""
+            if spoken is QAI_VO:
+                spoken = brand
+            elif term == "qai-vo.com":
+                spoken = brand + (" دوت كوم" if self.language == "ar" else " dot com")
+            elif isinstance(spoken, dict):
+                spoken = spoken.get(self.language) or ""
             if term and spoken:
                 self.entries[term] = str(spoken)
 

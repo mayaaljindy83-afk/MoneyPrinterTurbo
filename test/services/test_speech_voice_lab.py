@@ -123,6 +123,16 @@ class TestVoiceLab(Case):
         self.assertEqual(report["results"][0]["engine"], "edge")
 
 
+class TestBrandByEar(Case):
+    def test_versions_made_and_choice_saved(self):
+        with mock.patch.object(config, "save_config"), mock.patch.dict(config.app, {}):
+            made = voice_lab.brand_test("ar", tts=fake_edge)
+            self.assertEqual(len(made), len(voice_lab.saved_brand_test("ar")))
+            self.assertIn(made[1]["variant"], fake_edge.calls[1][0])  # each version read in the sentence
+            voice_lab.choose_brand("ar", made[1]["variant"])
+            self.assertEqual(config.app["qai_vo_spoken_ar"], made[1]["variant"])
+
+
 class TestVoiceLabPage(Case):
     def test_page_without_runpod_keeps_edge_only(self):
         from streamlit.testing.v1 import AppTest

@@ -12,7 +12,7 @@ if root_dir not in sys.path:
 
 from app.config import config  # noqa: E402
 from app.services.presenter import runpod_agent  # noqa: E402
-from app.services.speech import voice_lab  # noqa: E402
+from app.services.speech import pronunciation, voice_lab  # noqa: E402
 
 st.set_page_config(page_title="Voice Lab", page_icon="🎙️", layout="wide")
 
@@ -35,6 +35,14 @@ TEXT = {
     "tashkeel": ("Use LLM tashkeel in my videos (Edge voice)", "استعملي التشكيل بالذكاء الاصطناعي بفيديوهاتي (صوت Edge)"),
     "saved": ("Saved", "انحفظ"),
     "sample": ("Sample text", "النص"),
+    "brand_title": ("How should the voice say QAI-VO?", "كيف لازم يلفظ الصوت QAI-VO؟"),
+    "brand_help": ("The same sentence with QAI-VO written in different ways for the voice (the screen always "
+                   "shows QAI-VO). Listen and keep the one that sounds like the official pronunciation.",
+                   "نفس الجملة، وQAI-VO مكتوبة للصوت بكذا طريقة (على الشاشة دايماً QAI-VO). "
+                   "اسمعي وخلّي اللي بيطلع متل اللفظ الرسمي."),
+    "brand_make": ("Make the versions", "اعملي النسخ"),
+    "brand_use": ("Use this one", "استعملي هاي"),
+    "brand_current": ("In use", "المستعملة هلأ"),
 }
 LABELS = {
     "edge": ("Edge (as today)", "Edge (متل هلأ)"),
@@ -81,6 +89,25 @@ if tashkeel != bool(config.app.get("pronunciation_tashkeel", False)):
     config.app["pronunciation_tashkeel"] = tashkeel
     config.save_config()
     st.success(t("saved"))
+
+
+st.subheader(t("brand_title"))
+st.caption(t("brand_help"))
+for code, name in (("ar", "العربية"), ("en", "English")):
+    with st.expander(f"QAI-VO — {name}", expanded=code == "ar"):
+        if st.button(t("brand_make"), key=f"brand_make_{code}"):
+            with st.spinner("…"):
+                voice_lab.brand_test(code)
+        current = pronunciation.brand_spoken(code)
+        for index, item in enumerate(voice_lab.saved_brand_test(code)):
+            c1, c2 = st.columns([3, 1])
+            c1.markdown(f"**{index + 1}.** `{item['variant']}`" + (f"  ✓ {t('brand_current')}"
+                                                                    if item["variant"] == current else ""))
+            c1.audio(item["file"])
+            if c2.button(t("brand_use"), key=f"brand_use_{code}_{index}", disabled=item["variant"] == current):
+                voice_lab.choose_brand(code, item["variant"])
+                st.success(t("saved"))
+                st.rerun()
 
 
 @st.fragment(run_every="10s")

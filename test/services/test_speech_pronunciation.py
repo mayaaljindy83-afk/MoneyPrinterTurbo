@@ -50,7 +50,8 @@ class TestDictionary(Case):
         self.assertEqual(result.spoken, "مع كيو إيه آي ڤي أو تتحقق من روابط دي أو آي بالـ إيه آي.")
         self.assertEqual([r["term"] for r in result.replacements], ["QAI-VO", "DOI", "AI"])
         english = PronunciationProcessor("en").process("QAI-VO finds DOI links with AI")
-        self.assertEqual(english.spoken, "Q A I V O finds D O I links with A I.")
+        # English voices read DOI / AI well themselves (Voice Lab listening test); only the brand is spelled.
+        self.assertEqual(english.spoken, "Q A I V O finds DOI links with AI.")
 
     def test_ai_inside_words_is_not_replaced(self):
         self.assertEqual(PronunciationProcessor("en").process("Said the email").spoken, "Said the email.")
@@ -113,6 +114,22 @@ class TestPausesAndTashkeel(Case):
             result = PronunciationProcessor("ar", diacritizer=pr.llm_diacritizer).process("نتائج ممتازة")
         self.assertTrue(result.diacritized)
         self.assertIn("Do not add, remove", ask.call_args[0][0])
+
+
+class TestBrandChosenByEar(Case):
+    def test_chosen_spelling_is_used_but_still_protected(self):
+        from app.config import config
+
+        with mock.patch.dict(config.app, {"qai_vo_spoken_ar": "كيو إيه آي في أو"}):
+            spoken = PronunciationProcessor("ar", overrides={"QAI-VO": "كاي فو"}).process("منصة QAI-VO").spoken
+            site = PronunciationProcessor("ar").process("qai-vo.com").spoken
+        self.assertEqual(spoken, "منصة كيو إيه آي في أو.")
+        self.assertEqual(site, "كيو إيه آي في أو دوت كوم.")
+        self.assertIn("كيو إيه آي ڤي أو", PronunciationProcessor("ar").process("QAI-VO").spoken)  # default
+
+    def test_variants_to_listen_to(self):
+        self.assertEqual(pr.BRAND_VARIANTS["ar"][0], pr.QAI_VO["ar"])
+        self.assertGreaterEqual(len(pr.BRAND_VARIANTS["en"]), 3)
 
 
 if __name__ == "__main__":
