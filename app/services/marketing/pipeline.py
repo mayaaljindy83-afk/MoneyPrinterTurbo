@@ -203,6 +203,11 @@ def start(project_id: str, mode: str, token: str, options: dict | None = None, a
     if job_id and (studio.can_continue(job_id) or studio.read_status(job_id).get("state") in studio.ACTIVE_STATES):
         studio.start_resume(job_id, token, options, agent=agent)  # fetch; never redo finished scenes
         return job_id
+    if job_id and studio.kaggle_run_failed(job_id):
+        # The Kaggle run failed (e.g. a download broke): run the same job again; scenes that
+        # were already finished go up with it and are not rendered again.
+        studio.start_kaggle_render(job_id, token, options, agent=agent)
+        return job_id
     job_id = create_job(project_id, mode)
     studio.start_kaggle_render(job_id, token, options, agent=agent)
     return job_id

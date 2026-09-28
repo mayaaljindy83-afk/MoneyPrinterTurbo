@@ -51,6 +51,7 @@ class FakeKaggle:
 
     def __init__(self):
         self.runs = 0
+        self.calls = []
 
     def _render(self, job_id):
         self.runs += 1
@@ -75,9 +76,11 @@ class FakeKaggle:
         return {"total": total, "done": total, "complete": True, "rendered_now": done}
 
     def run_job(self, job_id, on_status=None, max_runs=4, continuing=False):
+        self.calls.append("run")
         return self._render(job_id)
 
     def resume(self, job_id, max_runs=4, on_status=None):
+        self.calls.append("resume")
         return self._render(job_id)
 
 
@@ -205,6 +208,35 @@ class TestWebsiteAdPipeline(unittest.TestCase):
         with VideoFileClip(status["final"]) as clip:
             self.assertEqual(clip.size, [720, 1280])
         self.assertTrue(all(v.startswith("en-") for v in _tts.voices))
+
+    def test_failed_kaggle_run_is_rendered_again_not_resumed(self):
+        """Regression: after a Kaggle run failed (model download broke), pressing Preview only
+        re-read the old failed run ('failed before making any shot') instead of trying again."""
+        project = self._analyze()
+        job_id = pipeline.create_job(project["project_id"], "preview")
+        studio.prepare_package(job_id)
+        with open(os.path.join(job_package.job_dir(job_id), "kaggle.json"), "w", encoding="utf-8") as fp:
+            json.dump({"kernel": "maya/mpt-presenter-x", "dataset": "maya/mpt-job-x"}, fp)
+        studio.set_status(job_id, "error", "ERROR: The Kaggle run failed before making any shot.", kaggle="error")
+        self.assertFalse(studio.can_continue(job_id))
+        agent = FakeKaggle()
+        self.assertEqual(pipeline.start(project["project_id"], "preview", "token", {"bgm_type": ""}, agent=agent),
+                         job_id)  # same job, a new run
+        self._wait(job_id)
+        self.assertEqual(agent.calls, ["run"])
+
+    def test_laptop_error_after_finished_kaggle_run_only_fetches(self):
+        project = self._analyze()
+        job_id = pipeline.create_job(project["project_id"], "preview")
+        studio.prepare_package(job_id)
+        with open(os.path.join(job_package.job_dir(job_id), "kaggle.json"), "w", encoding="utf-8") as fp:
+            json.dump({"kernel": "maya/mpt-presenter-x", "dataset": "maya/mpt-job-x"}, fp)
+        studio.set_status(job_id, "error", "ERROR: 'charmap' codec can't encode", kaggle="complete")
+        self.assertTrue(studio.can_continue(job_id))
+        agent = FakeKaggle()
+        pipeline.start(project["project_id"], "preview", "token", {"bgm_type": ""}, agent=agent)
+        self._wait(job_id)
+        self.assertEqual(agent.calls, ["resume"])  # no new GPU run
 
     def test_missing_presenter_render_falls_back_to_photo(self):
         project = self._analyze()
