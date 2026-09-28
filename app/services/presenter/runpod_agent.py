@@ -40,6 +40,10 @@ class RunPodError(RuntimeError):
     pass
 
 
+class ResultsLost(RunPodError):
+    """The worker that made the shots is gone (no network volume): they must be rendered again."""
+
+
 def configured_key() -> str:
     return str(config.app.get("runpod_api_key", "") or os.environ.get("RUNPOD_API_KEY", "")).strip()
 
@@ -176,6 +180,8 @@ class RunPodAgent:
             if state in FINISHED or state == "NOT_FOUND":
                 output = answer.get("output")
                 error = answer.get("error") or (output.get("error") if isinstance(output, dict) else "") or ""
+                if error:
+                    self.log(f"RunPod error: {str(error)[:800]}")  # shown right away on the page
                 self.last_run = {"state": state, "queue_seconds": (answer.get("delayTime") or 0) / 1000,
                                  "execution_seconds": (answer.get("executionTime") or 0) / 1000,
                                  "gpu": output.get("gpu", "") if isinstance(output, dict) else ""}
@@ -196,6 +202,10 @@ class RunPodAgent:
         """Copy what the endpoint kept for this job into ``<job>/output``; returns summary.json (or {})."""
         started = time.time()
         listing = self.call({"mode": "list", "job_id": job_id})
+        if not listing.get("exists") and not listing.get("persistent", True):
+            raise ResultsLost("The RunPod worker shut down before its results were fetched (the endpoint has no "
+                              "network volume). Press Render to make the shots again; keep the endpoint's idle "
+                              "timeout at 300 s so the laptop can fetch them.")
         output = os.path.join(job_package.job_dir(job_id), "output")
         for sub in ("shots", "frames", "candidates"):
             os.makedirs(os.path.join(output, sub), exist_ok=True)
@@ -262,7 +272,17 @@ class RunPodAgent:
         state, error = self.wait(request, on_status=on_status)
         if state == "TIMEOUT":
             raise RunPodError("Stopped waiting for RunPod; press Continue later to fetch the result.")
-        summary = self.download(job_id)
+        try:
+            summary = self.download(job_id)
+        except RunPodError as exc:
+            lost = isinstance(exc, ResultsLost)
+            if lost or state != "COMPLETED" or error:
+                if on_status:
+                    on_status("error")  # nothing to fetch: offer Render, not Continue
+                if lost and not error:
+                    raise
+                raise RunPodError(f"The RunPod run ended ({state}): {error or exc}") from exc
+            raise
         done = bool(summary.get("complete")) or (self._is_presenter_job(job_id) and state in ("COMPLETED", "NOT_FOUND"))
         if done:
             self.log("all shots are ready")

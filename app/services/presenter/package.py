@@ -79,14 +79,27 @@ def _copy_image(src: str, dst: str, max_side: int = 1600) -> None:
 
 def record_narration(shot: dict, audio_file: str, subtitle_file: str, voice_name: str, voice_rate: float,
                      tts=None) -> float:
-    """TTS one shot; returns its duration in seconds."""
+    """TTS one shot; returns its duration in seconds.
+
+    The voice reads the SPOKEN form (PronunciationProcessor: QAI-VO letter by letter, acronyms,
+    optional tashkeel); the subtitles keep the DISPLAY text. ``shot["spoken"]`` records what was read.
+    """
+    from app.services.speech import narration
+
     tts = tts or voice.tts
-    sub_maker = tts(text=shot["narration"], voice_name=voice_name, voice_rate=voice_rate, voice_file=audio_file)
+    prepared = narration.prepare(shot["narration"], narration.processor_for(voice_name))
+    shot["spoken"] = prepared["spoken"]
+    if prepared["unknown_terms"]:
+        logger.info(f"shot {shot['id']}: no pronunciation entry for {', '.join(prepared['unknown_terms'])}")
+    changed = any(display.strip().rstrip(".") != spoken.rstrip(".") for display, spoken in prepared["lines"])
+    text = prepared["spoken"] if changed else shot["narration"]
+    sub_maker = tts(text=text, voice_name=voice_name, voice_rate=voice_rate, voice_file=audio_file)
     if sub_maker is None or not os.path.isfile(audio_file):
         raise RuntimeError(f"text to speech failed for shot {shot['id']}")
     duration = voice.get_audio_duration(audio_file) or voice.get_audio_duration(sub_maker)
     try:
-        voice.create_subtitle(sub_maker=sub_maker, text=shot["narration"], subtitle_file=subtitle_file)
+        if not (changed and narration.write_display_srt(sub_maker, prepared["lines"], subtitle_file)):
+            voice.create_subtitle(sub_maker=sub_maker, text=shot["narration"], subtitle_file=subtitle_file)
     except Exception as exc:  # subtitles are optional; the video still works
         logger.warning(f"subtitle for shot {shot['id']} failed: {exc}")
     return round(float(duration), 3)
@@ -123,8 +136,8 @@ def build_package(job_id: str, presenter: Presenter, shots: list[dict], settings
             spoken = record_narration(shot, audio_path, srt_path, presenter.voice_name, presenter.voice_rate, tts)
             # ``min_duration``: the storyboard length; the picture holds after the narration ends.
             shot["duration"] = round(max(spoken, float(shot.get("min_duration") or 0)), 3)
-        entry = {k: shot[k] for k in ("id", "type", "narration", "location", "action", "camera", "duration")
-                 if k in shot}
+        entry = {k: shot[k] for k in ("id", "type", "narration", "spoken", "location", "action", "camera",
+                                      "duration") if k in shot}
         entry["audio"] = audio_name
         for flag in ("green", "local"):  # green: keyed and composited locally; local: made on the laptop
             if shot.get(flag):
