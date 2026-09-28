@@ -9,6 +9,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import types
@@ -202,10 +203,16 @@ class TestHandler(RunPodCase):
         self.assertIn("outside", answer["error"])
         self.assertFalse(os.path.exists(os.path.join(self.volume, "jobs", "j3", "escape.txt")))
 
-    def test_missing_network_volume_is_explained(self):
+    def test_without_network_volume_the_worker_disk_is_used(self):
         self.handler.VOLUME = os.path.join(self.tmp, "no-volume")
-        answer = self.handler.handler({"input": {"mode": "list", "job_id": "j1"}})
-        self.assertIn("network volume", answer["error"])
+        self.handler.LOCAL_STORE = os.path.join(self.tmp, "worker-disk")
+        job = json.dumps({"job_id": "j9", "shots": [{"id": "s01"}]})
+        result = self.handler.handler({"input": {"mode": "render", "job_id": "j9", "fresh": True,
+                                                 "package": self._zip({"job.json": job})}})
+        self.assertTrue(result["summary"]["complete"])
+        self.assertFalse(result["persistent"])
+        self.assertTrue(os.path.isfile(os.path.join(self.tmp, "worker-disk", "jobs", "j9", "output", "shots", "s01.mp4")))
+        self.assertEqual(self.worker.calls[-1]["--cache"], os.path.join(self.tmp, "worker-disk", "models"))
 
     def test_worker_failure_before_any_shot_reports_the_log(self):
         sys.modules["presenter_worker"] = fake_worker({}, fail="ComfyUI did not start")
@@ -280,15 +287,30 @@ class TestAgent(RunPodCase):
 
     def test_run_error_is_shown_even_when_nothing_can_be_fetched(self):
         job_id = self.make_job()
-        self.handler.VOLUME = os.path.join(self.tmp, "no-volume")  # endpoint without a network volume
+        self.handler.render = lambda job, progress=None: {"error": "CUDA out of memory"}
+        self.handler.list_job = lambda job_id: (_ for _ in ()).throw(self.handler.HandlerError("disk gone"))
         messages, states = [], []
         agent = runpod_agent.RunPodAgent(api_key="key", endpoint_id="ep1", session=FakeRunPod(self.handler),
                                          poll_seconds=0, log=messages.append, sleep=lambda s: None)
         with self.assertRaises(runpod_agent.RunPodError) as ctx:
             agent.run_job(job_id, max_runs=1, on_status=states.append)
-        self.assertIn("network volume", str(ctx.exception))
-        self.assertTrue(any(m.startswith("RunPod error:") and "network volume" in m for m in messages))
+        self.assertIn("CUDA out of memory", str(ctx.exception))
+        self.assertTrue(any(m.startswith("RunPod error:") and "CUDA" in m for m in messages))
         self.assertEqual(states[-1], "error")
+
+    def test_results_gone_with_the_worker_offers_render_again(self):
+        job_id = self.make_job()
+        self.handler.VOLUME = os.path.join(self.tmp, "no-volume")
+        self.handler.LOCAL_STORE = os.path.join(self.tmp, "worker-disk")
+        fake = FakeRunPod(self.handler)
+        agent = self.agent(fake)
+        agent.submit(job_id, fresh=True)
+        shutil.rmtree(os.path.join(self.tmp, "worker-disk"))  # the worker scaled down: its disk is gone
+        states = []
+        with self.assertRaises(runpod_agent.ResultsLost) as ctx:
+            agent.resume(job_id, max_runs=1, on_status=states.append)
+        self.assertIn("Render", str(ctx.exception))
+        self.assertEqual(states[-1], "error")  # studio.kaggle_run_failed -> Render, not an endless Continue
 
     def test_partial_run_is_reported_not_rerun_by_continue(self):
         sys.modules["presenter_worker"] = fake_worker({"s01": b"one"})

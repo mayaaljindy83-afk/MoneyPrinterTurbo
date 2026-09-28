@@ -1,10 +1,10 @@
 """RunPod Serverless entry point for the presenter worker.
 
 The GPU work is exactly ``kaggle/presenter_worker.py`` (the same script Kaggle
-runs); this file only moves files in and out. Everything a job makes stays on
-the endpoint's network volume (``/runpod-volume``) until the laptop has
-downloaded it, so a finished run is never lost when the laptop was off, and
-the ~60 GB of models download once instead of on every start.
+runs); this file only moves files in and out. With a network volume
+(``/runpod-volume``) models and results persist across workers; without one
+(any data center, better GPU availability) they live on the worker's disk
+while it stays up, and the laptop fetches the results right after the run.
 
 Requests (``input``):
 
@@ -32,6 +32,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 VOLUME = os.environ.get("MPT_VOLUME", "/runpod-volume")
+# Without a network volume (the usual serverless setup: any data center) everything lives on the
+# worker's own disk while it stays up: models are downloaded once per worker, results are fetched
+# by the laptop right after the run (keep the endpoint's idle timeout at a few minutes).
+LOCAL_STORE = os.environ.get("MPT_LOCAL_STORE", "/mpt-store")
+
+
+def store_root() -> str:
+    return VOLUME if os.path.isdir(VOLUME) else LOCAL_STORE
+
+
+def persistent() -> bool:
+    return os.path.isdir(VOLUME)
 COMFY_DIR = os.environ.get("MPT_COMFY_DIR", "/comfy")
 MAX_PIECE = 4 * 1024 * 1024  # bytes per fetch answer (base64 must stay well under RunPod's limits)
 DEFAULT_BUDGET = 3 * 3600
@@ -50,10 +62,7 @@ def _job_id(value) -> str:
 
 
 def job_root(job_id: str) -> str:
-    if not os.path.isdir(VOLUME):
-        raise HandlerError("No network volume is attached to this endpoint (/runpod-volume). "
-                           "Attach one in the endpoint settings; results are kept there.")
-    return os.path.join(VOLUME, "jobs", _job_id(job_id))
+    return os.path.join(store_root(), "jobs", _job_id(job_id))
 
 
 def _inside(root: str, relative: str) -> str:
@@ -97,7 +106,7 @@ def render(job: dict, progress=None) -> dict:
     os.makedirs(out, exist_ok=True)
     _unpack(job["input"]["package"], os.path.join(root, "package"))
 
-    store = os.path.join(VOLUME, "models")
+    store = os.path.join(store_root(), "models")
     os.makedirs(store, exist_ok=True)
     os.environ["MPT_MODEL_STORE"] = store
     import presenter_worker
@@ -154,7 +163,8 @@ def list_job(job_id: str) -> dict:
     for name in ("summary.json", "progress.json", "worker.log"):
         if os.path.isfile(os.path.join(out, name)):
             files.append({"path": name, "size": os.path.getsize(os.path.join(out, name))})
-    return {"job_id": job_id, "exists": os.path.isdir(out), "summary": _read_json(os.path.join(out, "summary.json")),
+    return {"job_id": job_id, "exists": os.path.isdir(out), "persistent": persistent(),
+            "summary": _read_json(os.path.join(out, "summary.json")),
             "files": files, "log": _tail(os.path.join(out, "worker.log"))}
 
 
@@ -206,7 +216,7 @@ def tts(inp: dict) -> dict:
     with open(os.path.join(work, "request.json"), "w", encoding="utf-8") as fp:
         json.dump({"items": request}, fp, ensure_ascii=False)
     env = dict(os.environ)
-    cache = os.path.join(VOLUME, "hf") if os.path.isdir(VOLUME) else os.path.join(work, "hf")
+    cache = os.path.join(store_root(), "hf")
     env.update({"HF_HOME": cache, "MPT_NEMO_CACHE": os.path.join(cache, "nemo_grammars"), "PYTHONUTF8": "1"})
     out = os.path.join(work, "out")
     run = subprocess.run([SILMA_PYTHON, TTS_ENGINES[engine], os.path.join(work, "request.json"), out],
