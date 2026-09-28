@@ -129,6 +129,14 @@ def build_package(job_id: str, presenter: Presenter, shots: list[dict], settings
         for flag in ("green", "local"):  # green: keyed and composited locally; local: made on the laptop
             if shot.get(flag):
                 entry[flag] = True
+        if entry["type"] == "ANIMATE":
+            # Body motion from the motion library (a tested driving clip, mirrored to the target side).
+            from app.services.presenter import motion_library
+
+            driving = f"motions/{shot['id']}.mp4"
+            info = motion_library.prepare(shot["motion"], entry["duration"], os.path.join(package, driving))
+            entry.update({"driving": driving, "motion": info["motion"], "pose_prompt": info["pose_prompt"],
+                          "mirrored": info["mirrored"], "green": True})
         place = places.get(shot.get("place", ""))
         if place:
             if place["path"] not in location_files:

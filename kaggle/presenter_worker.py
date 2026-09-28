@@ -73,6 +73,10 @@ MODELS = {
         "model_patches"),
     "wav2vec2-chinese-base_fp16.safetensors": (
         f"{HF}/Kijai/wav2vec2_safetensors/resolve/main/wav2vec2-chinese-base_fp16.safetensors", "audio_encoders"),
+    # --- body motion (Wan Animate 2: reference photo + driving video) ---
+    "wan_animate_2_int8_convrot.safetensors": (
+        f"{HF}/Comfy-Org/Wan-Animate-2/resolve/main/diffusion_models/wan_animate_2_int8_convrot.safetensors",
+        "diffusion_models"),
     # --- image (Qwen-Image-Edit-2511) ---
     "qwen_image_edit_2511_fp8mixed.safetensors": (
         f"{HF}/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
@@ -100,10 +104,22 @@ VIDEO_MODELS = ["Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
                 "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
                 "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "Wan2_1_VAE_bf16.safetensors", "clip_vision_h.safetensors"]
 TALK_MODELS = ["wan2.1_infiniteTalk_single_fp16.safetensors", "wav2vec2-chinese-base_fp16.safetensors"]
+ANIMATE_MODELS = ["wan_animate_2_int8_convrot.safetensors",
+                  "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+                  "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "Wan2_1_VAE_bf16.safetensors", "clip_vision_h.safetensors"]
 CREATE_MODELS = ["z_image_turbo_bf16.safetensors", "qwen_3_4b.safetensors", "ae.safetensors"]
 
 TALK_TYPES = {"TALK", "POINT"}
-MOTION_TYPES = {"WALK", "BROLL", "AI_SCENE"}  # AI_SCENE: text-to-image first frame, no presenter
+# AI_SCENE: text-to-image first frame, no presenter. DRIVE: a motion-library candidate, the presenter
+# photo itself as first frame, on a plain background (becomes a driving clip for Wan Animate 2).
+MOTION_TYPES = {"WALK", "BROLL", "AI_SCENE", "DRIVE"}
+ANIMATE_TYPES = {"ANIMATE"}  # presenter photo + driving clip from the motion library (Wan Animate 2)
+ANIMATE_FPS = 30
+ANIMATE_SIZE = (480, 832)  # portrait: the presenter fills the height; keyed and composited on the laptop
+# The standard Wan negative prompt, as in the official Wan Animate 2 template.
+WAN_NEGATIVE = ("色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，"
+                "丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，"
+                "静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走")
 NEGATIVE = ("blurry, low quality, distorted face, deformed hands, extra fingers, extra limbs, text, watermark, "
             "logo, subtitles, static, frozen, jitter")
 
@@ -199,10 +215,12 @@ def validate_job(job: dict) -> None:
         if shot.get("id") in seen or not re.fullmatch(r"[A-Za-z0-9_-]+", str(shot.get("id", ""))):
             raise SystemExit(f"bad or duplicate shot id: {shot.get('id')!r}")
         seen.add(shot["id"])
-        if shot.get("type") not in TALK_TYPES | MOTION_TYPES:
+        if shot.get("type") not in TALK_TYPES | MOTION_TYPES | ANIMATE_TYPES:
             raise SystemExit(f"shot {shot['id']}: unknown type {shot.get('type')}")
         if shot["type"] in TALK_TYPES and not shot.get("audio"):
             raise SystemExit(f"shot {shot['id']}: TALK/POINT shots need audio")
+        if shot["type"] in ANIMATE_TYPES and not shot.get("driving"):
+            raise SystemExit(f"shot {shot['id']}: ANIMATE shots need a driving clip")
         if float(shot.get("duration", 0)) <= 0:
             raise SystemExit(f"shot {shot['id']}: duration must be positive")
     if not (job.get("presenter") or {}).get("reference_images"):
@@ -242,6 +260,21 @@ def motion_chunks(duration: float) -> list[int]:
         if remaining <= 1:
             break
     return chunks
+
+
+def animate_segments(frames: int) -> list[int]:
+    """Lengths (4k+1, at most 81) of the chained Wan Animate 2 chunks covering ``frames``.
+
+    Each chunk after the first starts with the previous chunk's last frame (dropped), so it
+    adds ``length - 1`` new frames; the last chunk is only as long as needed.
+    """
+    legal = lambda n: min(SEGMENT_FRAMES, 4 * math.ceil(max(n - 1, 0) / 4) + 1)  # noqa: E731
+    lengths = [legal(frames)]
+    remaining = frames - lengths[0]
+    while remaining > 0:
+        lengths.append(legal(remaining + 1))
+        remaining -= lengths[-1] - 1
+    return lengths
 
 
 # --------------------------------------------------------------------------- workflows
@@ -330,6 +363,65 @@ def build_talk_workflow(image: str, audio: str, prompt: str, width: int, height:
     return g
 
 
+def build_animate_workflow(reference: str, driving: str, prompt: str, pose_prompt: str, width: int,
+                           height: int, frames: int, prefix: str, seed: int, steps: int = 6) -> dict:
+    """Wan Animate 2 (official template settings): the presenter photo performs the driving clip.
+
+    lightx2v LoRA, 6 steps, lcm, shift 5, cfg 1; chunks chained through ``continue_motion`` and
+    ``video_frame_offset``; the repeated joining frame is dropped; exactly ``frames`` frames saved.
+    """
+    g = {
+        "unet": {"class_type": "UNETLoader", "inputs": {"unet_name": "wan_animate_2_int8_convrot.safetensors", "weight_dtype": "default"}},
+        "lora": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["unet", 0], "lora_name": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors", "strength_model": 1.0}},
+        "shift": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["lora", 0], "shift": 5.0}},
+        # Pose branch runs once per chunk instead of every step (~2x faster); kept in RAM, not VRAM.
+        "cache": {"class_type": "WanAnimate2Cache", "inputs": {"model": ["shift", 0], "device": "cpu", "dtype": "int8"}},
+        "clip": {"class_type": "CLIPLoader", "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "pos": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": prompt}},
+        "pose_text": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": pose_prompt}},
+        "neg": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["clip", 0], "text": WAN_NEGATIVE}},
+        "vae": {"class_type": "VAELoader", "inputs": {"vae_name": "Wan2_1_VAE_bf16.safetensors"}},
+        "ref": {"class_type": "LoadImage", "inputs": {"image": reference}},
+        "clip_vision": {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": "clip_vision_h.safetensors"}},
+        "vision": {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["clip_vision", 0], "image": ["ref", 0], "crop": "none"}},
+        "drive_file": {"class_type": "LoadVideo", "inputs": {"file": driving}},
+        "drive": {"class_type": "GetVideoComponents", "inputs": {"video": ["drive_file", 0]}},
+        "sampler_select": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "lcm"}},
+        "sigmas": {"class_type": "BasicScheduler", "inputs": {"model": ["cache", 0], "scheduler": "simple", "steps": steps, "denoise": 1.0}},
+    }
+    frames_so_far = None
+    previous = None
+    for k, length in enumerate(animate_segments(frames)):
+        s = f"a{k}"
+        inputs = {
+            "positive": ["pos", 0], "negative": ["neg", 0], "vae": ["vae", 0],
+            "width": width, "height": height, "length": length, "batch_size": 1,
+            "reference_image": ["ref", 0], "pose_video": ["drive", 0], "clip_vision_output": ["vision", 0],
+            "positive_pose": ["pose_text", 0], "video_frame_offset": 0,
+            "pose_strength": 1.0, "pose_start_percent": 0.0, "pose_end_percent": 1.0, "reference_image_strength": 1.0,
+        }
+        if previous is not None:
+            inputs["continue_motion"] = frames_so_far
+            inputs["video_frame_offset"] = [previous, 5]
+        g[f"{s}_anim"] = {"class_type": "WanAnimate2ToVideo", "inputs": inputs}
+        g[f"{s}_sample"] = {"class_type": "SamplerCustom", "inputs": {
+            "model": ["cache", 0], "add_noise": True, "noise_seed": seed + k, "cfg": 1.0,
+            "positive": [f"{s}_anim", 0], "negative": [f"{s}_anim", 1], "sampler": ["sampler_select", 0],
+            "sigmas": ["sigmas", 0], "latent_image": [f"{s}_anim", 2]}}
+        g[f"{s}_trim_latent"] = {"class_type": "TrimVideoLatent", "inputs": {"samples": [f"{s}_sample", 0], "trim_amount": [f"{s}_anim", 3]}}
+        g[f"{s}_decode"] = {"class_type": "VAEDecode", "inputs": {"samples": [f"{s}_trim_latent", 0], "vae": ["vae", 0]}}
+        if frames_so_far is None:
+            frames_so_far = [f"{s}_decode", 0]
+        else:
+            g[f"{s}_new"] = {"class_type": "ImageFromBatch", "inputs": {"image": [f"{s}_decode", 0], "batch_index": [f"{s}_anim", 4], "length": 4096}}
+            g[f"{s}_all"] = {"class_type": "BatchImagesNode", "inputs": {"images.image0": frames_so_far, "images.image1": [f"{s}_new", 0]}}
+            frames_so_far = [f"{s}_all", 0]
+        previous = f"{s}_anim"
+    g["exact"] = {"class_type": "ImageFromBatch", "inputs": {"image": frames_so_far, "batch_index": 0, "length": frames}}
+    g["save"] = {"class_type": "SaveImage", "inputs": {"images": ["exact", 0], "filename_prefix": prefix}}
+    return g
+
+
 def build_motion_workflow(image: str, prompt: str, width: int, height: int, length: int,
                           prefix: str, seed: int, steps: int = 4) -> dict:
     """Wan 2.1 I2V 14B 480p + lightx2v: one motion chunk from a start frame."""
@@ -400,6 +492,15 @@ def motion_prompt(shot: dict) -> str:
     parts = [shot.get("action") or "", shot.get("camera") or "", shot.get("location") or ""]
     text = ", ".join(p for p in parts if p)
     return f"{text}. Natural smooth motion, realistic, cinematic, stable face." if text else "Natural smooth motion."
+
+
+def animate_prompt(presenter: dict) -> str:
+    """Looks and background only (no motion words), as the Wan Animate 2 template asks. The background is
+    flat chroma green so the laptop can key the presenter into the Website World."""
+    looks = presenter.get("description") or "a professional presenter"
+    return (f"Character Description: {looks}. Photorealistic, natural skin texture, sharp face and hands.\n"
+            "Background description: a plain, evenly lit pure green (#00FF00) chroma key studio wall, "
+            "no shadows, no objects.")
 
 
 def talk_prompt(shot: dict) -> str:
@@ -758,9 +859,14 @@ class Worker:
 
     # -- stage A: first frames ------------------------------------------------
     def make_frames(self) -> None:
-        shots = [s for s in self.pending() if not os.path.isfile(self.frame_path(s))]
+        # ANIMATE shots start from the presenter photo itself: no generated first frame.
+        shots = [s for s in self.pending() if not os.path.isfile(self.frame_path(s)) and s["type"] not in ANIMATE_TYPES]
         self.make_ai_frames([s for s in shots if s["type"] == "AI_SCENE"])
-        shots = [s for s in shots if s["type"] != "AI_SCENE"]
+        refs_all = (self.job.get("presenter") or {}).get("reference_images") or []
+        for shot in [s for s in shots if s["type"] == "DRIVE"]:  # no image model needed
+            fit_image(os.path.join(self.root, refs_all[0]), self.frame_path(shot), self.width, self.height)
+            self.progress.set(shot["id"], frame="presenter photo")
+        shots = [s for s in shots if s["type"] not in ("AI_SCENE", "DRIVE")]
         if not shots:
             return
         ensure_models(IMAGE_MODELS, self.comfy.dir, self.cache_dirs)
@@ -837,11 +943,14 @@ class Worker:
 
     # -- stage B: video ---------------------------------------------------------
     def make_videos(self) -> None:
-        shots = [s for s in self.pending() if os.path.isfile(self.frame_path(s))]
+        shots = [s for s in self.pending() if os.path.isfile(self.frame_path(s)) or s["type"] in ANIMATE_TYPES]
         if not shots:
             return
         needs_talk = any(s["type"] in TALK_TYPES for s in shots)
-        ensure_models(VIDEO_MODELS + (TALK_MODELS if needs_talk else []), self.comfy.dir, self.cache_dirs)
+        needs_i2v = any(s["type"] not in ANIMATE_TYPES for s in shots)
+        needs_animate = any(s["type"] in ANIMATE_TYPES for s in shots)
+        ensure_models((VIDEO_MODELS if needs_i2v else []) + (TALK_MODELS if needs_talk else [])
+                      + (ANIMATE_MODELS if needs_animate else []), self.comfy.dir, self.cache_dirs)
         self.comfy.start(self.comfy_args)
         try:
             for shot in shots:
@@ -856,6 +965,8 @@ class Worker:
                 try:
                     if shot["type"] in TALK_TYPES:
                         self.render_talk(shot)
+                    elif shot["type"] in ANIMATE_TYPES:
+                        self.render_animate(shot)
                     else:
                         self.render_motion(shot)
                 except RuntimeError as exc:
@@ -882,13 +993,33 @@ class Worker:
         frames = self.comfy.run(graph)
         frames_to_mp4(frames, self.shot_path(shot), TALK_FPS, audio=audio_src, duration=float(shot["duration"]))
 
+    def render_animate(self, shot: dict) -> None:
+        """The presenter photo performs the shot's driving clip (Wan Animate 2), on green, portrait."""
+        width, height = ANIMATE_SIZE
+        presenter = self.job.get("presenter") or {}
+        refs = presenter.get("reference_images") or []
+        if not refs:
+            raise RuntimeError("ANIMATE needs a presenter reference photo")
+        reference = fit_image(os.path.join(self.root, refs[0]), os.path.join(self.work, f"{shot['id']}_ref.png"),
+                              width, height)
+        ref_name = stage_input(self.comfy, reference, f"ref_{shot['id']}.png")
+        drive_name = stage_input(self.comfy, os.path.join(self.root, shot["driving"]), f"drive_{shot['id']}.mp4")
+        frames_needed = max(1, round(float(shot["duration"]) * ANIMATE_FPS))
+        graph = build_animate_workflow(ref_name, drive_name, animate_prompt(presenter),
+                                       shot.get("pose_prompt") or "a person moving naturally", width, height,
+                                       frames_needed, f"animate_{shot['id']}", self.seed)
+        frames = self.comfy.run(graph)
+        audio = os.path.join(self.root, shot["audio"]) if shot.get("audio") else None
+        frames_to_mp4(frames, self.shot_path(shot), ANIMATE_FPS, audio=audio, duration=float(shot["duration"]))
+
     def render_motion(self, shot: dict) -> None:
         parts = []
         start = self.frame_path(shot)
+        seed = int(shot.get("seed", self.seed))  # candidates of one motion differ by their own seed
         for index, length in enumerate(motion_chunks(float(shot["duration"]))):
             image_name = stage_input(self.comfy, start, f"start_{shot['id']}_{index}.png")
             graph = build_motion_workflow(image_name, motion_prompt(shot), self.width, self.height, length,
-                                          f"motion_{shot['id']}_{index}", self.seed + index)
+                                          f"motion_{shot['id']}_{index}", seed + index)
             frames = self.comfy.run(graph)
             if index:
                 frames = frames[1:]  # the joining frame is already in the previous part
