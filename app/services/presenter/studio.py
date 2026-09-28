@@ -271,12 +271,21 @@ def has_kaggle_run(job_id: str) -> bool:
         return False
 
 
+def kaggle_run_failed(job_id: str) -> bool:
+    """The last run on Kaggle itself ended in error (not a problem on the laptop afterwards)."""
+    status = read_status(job_id)
+    return status.get("state") == "error" and status.get("kaggle") == "error"
+
+
 def can_continue(job_id: str) -> bool:
-    """Continue is offered after a break, and after a local error once a Kaggle run exists
-    (its results can still be fetched without running the GPU again)."""
+    """Continue (fetch only, no new GPU run) is offered after a break, and after a local error
+    once a Kaggle run exists whose results can still be fetched. Not when the Kaggle run itself
+    failed: then there is nothing to fetch and rendering again is the way forward."""
     if is_busy(job_id):
         return False
-    return was_interrupted(job_id) or (read_status(job_id).get("state") == "error" and has_kaggle_run(job_id))
+    if was_interrupted(job_id):
+        return True
+    return read_status(job_id).get("state") == "error" and has_kaggle_run(job_id) and not kaggle_run_failed(job_id)
 
 
 def is_creation_job(job_id: str) -> bool:
