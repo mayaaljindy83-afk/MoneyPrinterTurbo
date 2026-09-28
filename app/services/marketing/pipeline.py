@@ -60,10 +60,10 @@ def save_project(project: dict) -> dict:
     folder = project_dir(project["project_id"])
     os.makedirs(folder, exist_ok=True)
     project["updated"] = time.time()
-    tmp = os.path.join(folder, "project.json.tmp")
+    tmp = os.path.join(folder, f"project.json.{os.getpid()}.{threading.get_ident()}.tmp")
     with open(tmp, "w", encoding="utf-8") as fp:
         json.dump(project, fp, ensure_ascii=False, indent=2)
-    os.replace(tmp, os.path.join(folder, "project.json"))
+    studio.replace_file(tmp, os.path.join(folder, "project.json"))  # survives Windows file locks
     return project
 
 

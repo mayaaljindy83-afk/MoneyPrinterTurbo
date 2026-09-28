@@ -31,27 +31,61 @@ def status_path(job_id: str) -> str:
     return os.path.join(job_package.job_dir(job_id), "status.json")
 
 
+_status_lock = threading.Lock()
+LOCK_RETRIES = 40
+
+
+def replace_file(tmp: str, path: str) -> None:
+    """os.replace that survives Windows locks.
+
+    On Windows a file cannot be replaced while anything has it open for a moment (the page
+    reading the status, an antivirus, the search indexer): WinError 32. Wait and retry; never
+    let a status file stop a render.
+    """
+    for attempt in range(LOCK_RETRIES):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(min(0.5, 0.05 * (attempt + 1)))
+    try:  # last resort: write over the file in place
+        shutil.copyfile(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def read_status(job_id: str) -> dict:
-    try:
-        with open(status_path(job_id), encoding="utf-8") as fp:
-            return json.load(fp)
-    except (OSError, ValueError):
-        return {"state": "new", "log": []}
+    path = status_path(job_id)
+    for attempt in range(LOCK_RETRIES):
+        try:
+            with open(path, encoding="utf-8") as fp:
+                return json.load(fp)
+        except FileNotFoundError:
+            break
+        except (PermissionError, ValueError):  # locked or caught mid-write: try again shortly
+            time.sleep(min(0.5, 0.05 * (attempt + 1)))
+        except OSError:
+            break
+    return {"state": "new", "log": []}
 
 
 def set_status(job_id: str, state: str | None = None, message: str = "", **fields) -> None:
-    status = read_status(job_id)
-    if state:
-        status["state"] = state
-    if message:
-        status.setdefault("log", []).append(f"{time.strftime('%H:%M')} {message}")
-        status["log"] = status["log"][-60:]
-    status.update(fields, updated=time.time())
-    os.makedirs(job_package.job_dir(job_id), exist_ok=True)
-    tmp = status_path(job_id) + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fp:
-        json.dump(status, fp, ensure_ascii=False, indent=2)
-    os.replace(tmp, status_path(job_id))
+    with _status_lock:  # the page and the background render may both write
+        status = read_status(job_id)
+        if state:
+            status["state"] = state
+        if message:
+            status.setdefault("log", []).append(f"{time.strftime('%H:%M')} {message}")
+            status["log"] = status["log"][-60:]
+        status.update(fields, updated=time.time())
+        os.makedirs(job_package.job_dir(job_id), exist_ok=True)
+        tmp = f"{status_path(job_id)}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fp:
+            json.dump(status, fp, ensure_ascii=False, indent=2)
+        replace_file(tmp, status_path(job_id))
 
 
 def is_busy(job_id: str) -> bool:
